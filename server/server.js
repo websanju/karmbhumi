@@ -65,7 +65,7 @@ const app = express();
 app.set("trust proxy", 1);
 app.use(express.json({ limit: "5mb" }));
 
-app.get("/api/health", (_req, res) => res.json({ ok: true }));
+app.get("/api/health", (_req, res) => res.json({ ok: true, database: "file", apiVersion: 2 }));
 
 app.get("/api/storage", (req, res) => {
   const prefix = String(req.query.prefix || "");
@@ -80,7 +80,7 @@ app.use("/api/storage/:key", (req, res, next) => {
 
 app.get("/api/storage/:key", (req, res) => {
   const { key } = req.params;
-  if (!(key in store)) return res.status(404).json({ error: "Not found" });
+  if (!(key in store)) return res.status(200).json({ key, value: null, shared: true });
   let value = store[key];
   const pin = pinHashOf(value);
   const sent = req.get("X-Admin-Hash");

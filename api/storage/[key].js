@@ -23,7 +23,7 @@ export default async function handler(req, res) {
     const pin = current ? pinHashOf(current) : null;
 
     if (req.method === "GET") {
-      if (current === null) return res.status(404).json({ error: "Not found" });
+      if (current === null) return res.status(200).json({ key, value: null, shared: true }); // empty database is normal
       let value = current;
       if (pin && sent !== pin) {
         if (sent) await recordFail(ip);

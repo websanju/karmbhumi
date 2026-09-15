@@ -24,7 +24,11 @@ window.storage = {
       if (value === null) throw new Error("Key not found");
       return { key, value, shared };
     }
-    return check(await fetch(api(key), { headers: adminHeader(), cache: "no-store" }));
+    const res = await fetch(api(key), { headers: adminHeader(), cache: "no-store" });
+    if (res.status === 404) throw new Error("API not found – server/API is not deployed");
+    const data = await check(res);
+    if (data.value === null || data.value === undefined) throw new Error("Key not found");
+    return data;
   },
 
   async set(key, value, shared = false) {

@@ -6,5 +6,5 @@ export default async function handler(_req, res) {
     try { await redis.ping(); } catch (e) { database = "error: " + e.message; }
   }
   res.setHeader("Cache-Control", "no-store");
-  res.status(200).json({ ok: database === "connected", database });
+  res.status(200).json({ ok: database === "connected", database, apiVersion: 2 });
 }
