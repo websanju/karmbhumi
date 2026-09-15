@@ -243,8 +243,8 @@ function ExpenseForm({ initial, festivals, defaultFest, onSave, onClose }) {
         <Field label="તારીખ"><input className="inp" type="date" value={f.date} onChange={set("date")} /></Field>
         <Field label="પ્રકાર"><select className="inp" value={f.category} onChange={set("category")}>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select></Field>
         <Field label="ચુકવણી રીત"><select className="inp" value={f.mode} onChange={set("mode")}>{MODES.map((c) => <option key={c}>{c}</option>)}</select></Field>
-        <Field label="ચૂકવનાર સભ્ય"><input className="inp" value={f.paidBy} onChange={set("paidBy")} placeholder="નામ" /></Field>
-        <Field label="વેપારી / દુકાન"><input className="inp" value={f.vendor} onChange={set("vendor")} /></Field>
+        <Field label="કોણે ચૂકવ્યા (સભ્ય)"><input className="inp" value={f.paidBy} onChange={set("paidBy")} placeholder="દા.ત. રાજુભાઈ" /></Field>
+        <Field label="કોને ચૂકવ્યા (વેપારી / વ્યક્તિ)"><input className="inp" value={f.vendor} onChange={set("vendor")} placeholder="દા.ત. જય સાઉન્ડ" /></Field>
       </div>
       <Field label="નોંધ"><textarea className="inp" rows="2" value={f.note} onChange={set("note")} /></Field>
       <div className="actions"><button className="btn sec" onClick={onClose}>રદ કરો</button><button className="btn" onClick={save}>ખર્ચ સાચવો</button></div>
@@ -553,6 +553,112 @@ async function buildExcel(data, festId) {
     return ws;
   };
 
+  // 0. Full statement: every income with name, every expense with name, grouped with subtotals
+  {
+    const ws = wb.addWorksheet("પૂરો હિસાબ", { views: [{ state: "frozen", ySplit: 2 }] });
+    const keys = one ? ["no", "date", "name", "sub", "by", "mode", "note", "amount"] : ["no", "date", "fest", "name", "sub", "by", "mode", "note", "amount"];
+    const widths = { no: 6, date: 12, fest: 18, name: 34, sub: 22, by: 18, mode: 13, note: 26, amount: 14 };
+    ws.columns = keys.map((k) => ({ key: k, width: widths[k] }));
+    const N = keys.length;
+    const amtCol = N;
+    const amtLetter = ws.getColumn(amtCol).letter;
+    const thin = { style: "thin", color: { argb: "FFC9D6D3" } };
+    const border = { top: thin, left: thin, bottom: thin, right: thin };
+    const fill = (argb) => ({ type: "pattern", pattern: "solid", fgColor: { argb } });
+    const styleRow = (row, { bold, color, bg, size } = {}) => {
+      for (let i = 1; i <= N; i++) {
+        const c = row.getCell(i);
+        c.font = { name: FONT, bold: !!bold, size: size || 11, color: color ? { argb: color } : undefined };
+        if (bg) c.fill = fill(bg);
+        c.border = border;
+        c.alignment = { vertical: "top", wrapText: true, horizontal: i === amtCol ? "right" : "left" };
+      }
+    };
+    const mergedRow = (text, amount, opts) => {
+      const row = ws.addRow([]);
+      row.getCell(1).value = text;
+      ws.mergeCells(row.number, 1, row.number, N - 1);
+      if (amount !== undefined) row.getCell(amtCol).value = amount;
+      styleRow(row, opts);
+      return row;
+    };
+
+    ws.mergeCells(1, 1, 1, N);
+    ws.getCell(1, 1).value = `કર્મભૂમિ સોસાયટી, પાટણ – ${title} : આવક અને ખર્ચનો પૂરો હિસાબ`;
+    ws.getCell(1, 1).font = { name: FONT, size: 15, bold: true, color: { argb: "FF14303A" } };
+    ws.getRow(1).height = 26;
+    ws.mergeCells(2, 1, 2, N);
+    ws.getCell(2, 1).value = `રિપોર્ટ તારીખ: ${new Date().toLocaleDateString("en-IN")}  ·  આવક ${inc.length} એન્ટ્રી  ·  ખર્ચ ${exp.length} એન્ટ્રી`;
+    ws.getCell(2, 1).font = { name: FONT, size: 10, color: { argb: "FF5D7178" } };
+
+    const section = ({ label, color, light, headers, groups, toRow, totalLabel }) => {
+      ws.addRow([]);
+      mergedRow(label, "", { bold: true, color: "FFFFFFFF", bg: color, size: 13 });
+      const h = ws.addRow(keys.map((k) => headers[k] ?? ""));
+      styleRow(h, { bold: true, bg: light });
+      if (!groups.length) {
+        mergedRow("કોઈ એન્ટ્રી નથી", 0, {});
+        return { ref: null, value: 0 };
+      }
+      const subRefs = [];
+      let n = 0, total = 0;
+      groups.forEach((g) => {
+        mergedRow(`${g.t}  (${g.items.length})`, undefined, { bold: true, bg: "FFF3F6F5" });
+        const first = ws.rowCount + 1;
+        g.items.forEach((x) => {
+          n += 1;
+          const row = ws.addRow({ ...toRow(x), no: n });
+          styleRow(row);
+          row.getCell("date").numFmt = "dd-mm-yyyy";
+          row.getCell(amtCol).numFmt = RUPEE;
+        });
+        const last = ws.rowCount;
+        const v = g.items.reduce((a, x) => a + x.amount, 0);
+        total += v;
+        const sr = mergedRow(`${g.t} – કુલ`, { formula: `SUM(${amtLetter}${first}:${amtLetter}${last})`, result: v }, { bold: true });
+        sr.getCell(amtCol).numFmt = RUPEE;
+        sr.getCell(1).alignment = { horizontal: "right" };
+        subRefs.push(`${amtLetter}${sr.number}`);
+      });
+      const tr = mergedRow(totalLabel, { formula: subRefs.join("+"), result: total }, { bold: true, bg: light, size: 12 });
+      tr.getCell(amtCol).numFmt = RUPEE;
+      tr.getCell(1).alignment = { horizontal: "right" };
+      return { ref: `${amtLetter}${tr.number}`, value: total };
+    };
+
+    const incRes = section({
+      label: "આવક (જમા) – નામ સાથે પૂરી યાદી",
+      color: "FF2F7D4F", light: "FFE3F1E8",
+      headers: { no: "ક્ર.", date: "તારીખ", fest: "તહેવાર", name: "નામ", sub: "ઘર નં. / સરનામું", by: "", mode: "ચુકવણી રીત", note: "નોંધ", amount: "રકમ" },
+      groups: INCOME_TYPES.map((t) => ({ t, items: inc.filter((c) => incType(c) === t) })).filter((g) => g.items.length),
+      toRow: (c) => ({ date: toDate(c.date), fest: fname(c.festivalId), name: c.name || "-", sub: c.flat || "", by: "", mode: c.mode, note: c.note || "", amount: c.amount }),
+      totalLabel: "કુલ આવક",
+    });
+    const expRes = section({
+      label: "ખર્ચ (ઉધાર) – વિગત અને નામ સાથે પૂરી યાદી",
+      color: "FFB42A2A", light: "FFFBE9E9",
+      headers: { no: "ક્ર.", date: "તારીખ", fest: "તહેવાર", name: "ખર્ચની વિગત", sub: "કોને ચૂકવ્યા (વેપારી / વ્યક્તિ)", by: "કોણે ચૂકવ્યા", mode: "ચુકવણી રીત", note: "નોંધ", amount: "રકમ" },
+      groups: CATEGORIES.map((t) => ({ t, items: exp.filter((e) => e.category === t) })).filter((g) => g.items.length),
+      toRow: (e) => ({ date: toDate(e.date), fest: fname(e.festivalId), name: e.title, sub: e.vendor || "-", by: e.paidBy || "-", mode: e.mode, note: e.note || "", amount: e.amount }),
+      totalLabel: "કુલ ખર્ચ",
+    });
+
+    ws.addRow([]);
+    const bal = incRes.value - expRes.value;
+    const finals = [
+      ["કુલ આવક", incRes.ref ? { formula: incRes.ref, result: incRes.value } : 0, "FFE3F1E8"],
+      ["કુલ ખર્ચ", expRes.ref ? { formula: expRes.ref, result: expRes.value } : 0, "FFFBE9E9"],
+      [bal < 0 ? "બાકી સિલક (ખર્ચ વધુ)" : "બાકી સિલક", { formula: `${incRes.ref || 0}-${expRes.ref || 0}`, result: bal }, "FFFDF1D6"],
+    ];
+    finals.forEach(([label, val, bg]) => {
+      const r = mergedRow(label, val, { bold: true, bg, size: 13 });
+      r.getCell(1).alignment = { horizontal: "right" };
+      r.getCell(amtCol).numFmt = RUPEE;
+      if (label.startsWith("બાકી") && bal < 0) r.getCell(amtCol).font = { name: FONT, bold: true, size: 13, color: { argb: "FFB42A2A" } };
+    });
+    ws.pageSetup = { paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: "1:2" };
+  }
+
   // 1. Summary
   const sumRows = (one ? [one] : fests).map((f) => {
     const i = sum(data.collections.filter((c) => c.festivalId === f.id));
@@ -580,8 +686,8 @@ async function buildExcel(data, festId) {
 
   // 2. Combined ledger (income + expense together, running balance)
   const ledger = [
-    ...inc.map((c) => ({ d: c.date, o: 0, row: { date: toDate(c.date), fest: fname(c.festivalId), kind: "આવક", label: incType(c), name: c.name, house: c.flat || "", mode: c.mode, income: c.amount, expense: null, note: c.note || "" } })),
-    ...exp.map((e) => ({ d: e.date, o: 1, row: { date: toDate(e.date), fest: fname(e.festivalId), kind: "ખર્ચ", label: e.category, name: [e.title, e.vendor && `(${e.vendor})`].filter(Boolean).join(" "), house: e.paidBy || "", mode: e.mode, income: null, expense: e.amount, note: e.note || "" } })),
+    ...inc.map((c) => ({ d: c.date, o: 0, row: { date: toDate(c.date), fest: fname(c.festivalId), kind: "આવક", label: incType(c), name: c.name, party: c.flat ? `ઘર ${c.flat}` : "", house: "", mode: c.mode, income: c.amount, expense: null, note: c.note || "" } })),
+    ...exp.map((e) => ({ d: e.date, o: 1, row: { date: toDate(e.date), fest: fname(e.festivalId), kind: "ખર્ચ", label: e.category, name: e.title, party: e.vendor || "", house: e.paidBy || "", mode: e.mode, income: null, expense: e.amount, note: e.note || "" } })),
   ].sort((a, b) => (a.d || "").localeCompare(b.d || "") || a.o - b.o);
   let bal = 0;
   const ledgerRows = ledger.map(({ row }) => { bal += (row.income || 0) - (row.expense || 0); return { ...row, balance: bal }; });
@@ -590,8 +696,9 @@ async function buildExcel(data, festId) {
     ...(one ? [] : [{ key: "fest", header: "તહેવાર", width: 20 }]),
     { key: "kind", header: "આવક / ખર્ચ", width: 11 },
     { key: "label", header: "પ્રકાર", width: 18 },
-    { key: "name", header: "નામ / વિગત", width: 38 },
-    { key: "house", header: "ઘર નં. / ચૂકવનાર", width: 16 },
+    { key: "name", header: "આવક: આપનારનું નામ / ખર્ચ: વિગત", width: 34 },
+    { key: "party", header: "ઘર નં. / કોને ચૂકવ્યા", width: 22 },
+    { key: "house", header: "કોણે ચૂકવ્યા", width: 16 },
     { key: "mode", header: "ચુકવણી રીત", width: 13 },
     { key: "income", header: "આવક", width: 13, money: true },
     { key: "expense", header: "ખર્ચ", width: 13, money: true },
@@ -611,7 +718,7 @@ async function buildExcel(data, festId) {
     ...(one ? [] : [{ key: "fest", header: "તહેવાર", width: 20 }]),
     { key: "type", header: "આવકનો પ્રકાર", width: 18 },
     { key: "house", header: "ઘર નં.", width: 10 },
-    { key: "name", header: "નામ", width: 36 },
+    { key: "name", header: "આપનારનું નામ", width: 36 },
     { key: "mode", header: "ચુકવણી રીત", width: 13 },
     { key: "amount", header: "રકમ", width: 13, money: true },
     { key: "note", header: "નોંધ", width: 28 },
@@ -622,9 +729,9 @@ async function buildExcel(data, festId) {
     { key: "date", header: "તારીખ", width: 12, date: true },
     ...(one ? [] : [{ key: "fest", header: "તહેવાર", width: 20 }]),
     { key: "category", header: "ખર્ચનો પ્રકાર", width: 18 },
-    { key: "title", header: "વિગત", width: 34 },
-    { key: "vendor", header: "વેપારી / દુકાન", width: 20 },
-    { key: "paidBy", header: "ચૂકવનાર", width: 16 },
+    { key: "title", header: "ખર્ચની વિગત", width: 34 },
+    { key: "vendor", header: "કોને ચૂકવ્યા (વેપારી / વ્યક્તિ)", width: 26 },
+    { key: "paidBy", header: "કોણે ચૂકવ્યા", width: 16 },
     { key: "mode", header: "ચુકવણી રીત", width: 13 },
     { key: "amount", header: "રકમ", width: 13, money: true },
     { key: "note", header: "નોંધ", width: 26 },
