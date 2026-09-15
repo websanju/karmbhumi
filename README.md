@@ -8,6 +8,8 @@ karmbhumi-app/
 ├─ src/App.jsx          the app (Gujarati UI)
 ├─ src/storage.js       connects the app to the server
 ├─ server/server.js     API + serves the built app, checks the admin PIN
+├─ api/                 Vercel serverless API (uses Upstash Redis)
+├─ vercel.json          Vercel build settings
 ├─ deploy/              PM2 and Nginx config
 └─ Dockerfile           optional Docker deployment
 ```
@@ -108,7 +110,30 @@ Your data in `data/` is not touched by updates.
 
 ---
 
-## 3. Other hosting options
+## 3. Deploy on Vercel
+
+Vercel does not run `server/server.js` and cannot keep files, so on Vercel the
+`api/` folder is used instead and data is stored in **Upstash Redis** (free tier is enough).
+
+1. Push the code to GitHub and import the repo in Vercel (framework: Vite – detected from `vercel.json`).
+2. In the Vercel project open **Storage → Create Database → Upstash (Redis)**, pick a region
+   close to India (for example Mumbai `ap-south-1` if offered), and **connect it to this project**
+   for Production, Preview and Development.
+   This adds `KV_REST_API_URL` and `KV_REST_API_TOKEN` automatically.
+   (If you create the database directly on upstash.com instead, add
+   `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` under Settings → Environment Variables.)
+3. **Redeploy** (Deployments → ⋯ → Redeploy). Environment variables only apply to new deployments.
+4. Open `https://YOUR-SITE.vercel.app/api/health` – it must show
+   `{"ok":true,"database":"connected"}`.
+5. Open the site and create the admin PIN.
+
+Daily backups are kept in Redis as `kb:backup:YYYY-MM-DD` for 60 days.
+Use the in-app **"બેકઅપ લો"** button regularly as well.
+
+**Forgot the PIN on Vercel?** In the Upstash data browser open key
+`kb:store:karmbhumi-society-v1`, remove the `"pinHash"` entry from `settings`, save, then create a new PIN in the app.
+
+## 4. Other hosting options
 
 **Docker**
 
@@ -125,7 +150,7 @@ Shared hosting that only supports PHP will not work – Node.js is required.
 
 ---
 
-## 4. Backups and PIN
+## 5. Backups and PIN (own server)
 
 - Automatic daily copies: `data/backups/store-YYYY-MM-DD.json`.
 - Copy them off the server now and then:
@@ -133,7 +158,7 @@ Shared hosting that only supports PHP will not work – Node.js is required.
 - **Forgot the admin PIN?** On the server, open `data/store.json`, find `"pinHash"` inside the settings and delete that line (keep the JSON valid), then run `pm2 restart karmbhumi`. Open the app and create a new PIN straight away.
 - After 10 wrong PIN attempts, that device is blocked for 15 minutes.
 
-## 5. Settings
+## 6. Settings
 
 | Variable   | Default        | Purpose                   |
 |------------|----------------|---------------------------|
