@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Plus, Pencil, Trash2, X, Search, Download, Upload, Wallet, HandCoins, Scale, CalendarDays, LayoutDashboard, Receipt, PartyPopper, Users, FileText, Share2, MessageCircle, Lock, Unlock, RefreshCw, Cloud, Eye, FileSpreadsheet, UtensilsCrossed, Minus } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Search, Download, Upload, Wallet, HandCoins, Scale, CalendarDays, LayoutDashboard, Receipt, PartyPopper, Users, FileText, Share2, MessageCircle, Lock, Unlock, RefreshCw, Cloud, Eye, FileSpreadsheet, UtensilsCrossed, Minus, Gift } from "lucide-react";
 
 const STORE_KEY = "karmbhumi-society-v1";      // shared: visible to everyone using the app
 const ADMIN_KEY = "karmbhumi-admin-pin";        // personal: this device's unlocked PIN hash
@@ -42,7 +42,27 @@ const passText = (c) => {
   ].filter(Boolean).join(" + ");
   return `${parts} (${PASS_FOR[c.passFor] || ""})${c.guestLabel ? ` · મહેમાન: ${c.guestLabel}` : ""}`;
 };
-const noteOf = (c) => [passText(c), c.note].filter(Boolean).join(" · ");
+// Sponsor / donation given as an item (murti, gift, prizes...) instead of cash.
+// Stored with amount 0 so cash totals and balance never include it.
+const IN_KIND_TYPES = [SPONSOR, "દાન"];
+const isInKind = (c) => !!c.inKind && IN_KIND_TYPES.includes(c.type || "");
+const kindText = (c) => (isInKind(c)
+  ? `વસ્તુ: ${c.item}${Number(c.itemQty) > 1 ? ` × ${c.itemQty}` : ""}${Number(c.estValue) ? ` (અંદાજે ${fmt(c.estValue)})` : ""}`
+  : "");
+const ITEM_SUGGEST = [
+  [/ગણેશ|ગણપતિ/, ["ગણેશજીની મૂર્તિ", "મોદક / લાડુ પ્રસાદ", "પૂજા સામગ્રી", "ડેકોરેશન"]],
+  [/નવરાત્ર|ગરબા/, ["માતાજીની મૂર્તિ / ફોટો", "ગરબા ઇનામ", "લ્હાણી", "પ્રસાદ", "ટ્રોફી"]],
+  [/દિવાળી|નવું વર્ષ/, ["ફટાકડા", "મીઠાઈ", "દીવા / રોશની", "રંગોળી સામગ્રી"]],
+  [/ઉત્તરાયણ|સંક્રાંત/, ["પતંગ", "દોરી", "ચીકી", "ઉંધિયું / જલેબી"]],
+  [/જન્માષ્ટમી|કૃષ્ણ/, ["કૃષ્ણ ભગવાનની મૂર્તિ", "મટકી", "પારણું", "પ્રસાદ"]],
+  [/હોળી|ધુળેટી/, ["રંગ / ગુલાલ", "હોલિકા લાકડાં", "ખજૂર / ધાણી"]],
+  [/સ્વાતંત્ર્ય|પ્રજાસત્તાક/, ["રાષ્ટ્રધ્વજ", "મીઠાઈ", "બાળકો માટે ભેટ"]],
+];
+const itemSuggestions = (festName = "") => {
+  const hit = ITEM_SUGGEST.find(([re]) => re.test(festName));
+  return [...(hit ? hit[1] : []), "ઇનામ / ભેટ", "ટ્રોફી", "પ્રસાદ", "નાસ્તો", "ડેકોરેશન", "સાઉન્ડ સિસ્ટમ"];
+};
+const noteOf = (c) => [passText(c), kindText(c), c.note].filter(Boolean).join(" · ");
 const passCounts = (list) => {
   const r = { society: { full: 0, half: 0, amount: 0 }, outside: { full: 0, half: 0, amount: 0 } };
   list.filter((c) => (c.type || "") === PASS_TYPE).forEach((c) => {
@@ -286,7 +306,7 @@ function ExpenseForm({ initial, festivals, defaultFest, onSave, onClose }) {
 }
 
 function CollectionForm({ initial, isEdit, festivals, members, collections, defaultFest, onSave, onClose }) {
-  const [f, setF] = useState({ type: MEMBER_FUND, ...(initial || { festivalId: defaultFest || festivals[0]?.id || "", memberId: "", flat: "", name: "", amount: "", date: today(), mode: MODES[0], note: "" }) });
+  const [f, setF] = useState({ type: MEMBER_FUND, inKind: false, item: "", itemQty: 1, estValue: "", ...(initial || { festivalId: defaultFest || festivals[0]?.id || "", memberId: "", flat: "", name: "", amount: "", date: today(), mode: MODES[0], note: "" }) });
   const [err, setErr] = useState({});
   const [mq, setMq] = useState("");
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -296,23 +316,33 @@ function CollectionForm({ initial, isEdit, festivals, members, collections, defa
     setF({ ...f, memberId: id, flat: m ? m.house : "", name: m ? m.name : "" });
   };
   const isFund = f.type === MEMBER_FUND;
+  const canKind = IN_KIND_TYPES.includes(f.type);
+  const kind = canKind && f.inKind;
+  const festName = festivals.find((x) => x.id === f.festivalId)?.name || "";
   const already = isFund && f.memberId && collections.some((c) => c.id !== f.id && c.festivalId === f.festivalId && c.memberId === f.memberId && incType(c) === MEMBER_FUND);
   const save = () => {
     const e = {};
     if (!f.festivalId) e.festivalId = "તહેવાર પસંદ કરો";
     if (!f.name.trim() && !f.flat.trim()) e.name = isFund ? "ઘર પસંદ કરો" : "ઘર પસંદ કરો અથવા નામ લખો";
     if (isFund && !f.memberId) e.name = "સભ્ય ફાળા માટે યાદીમાંથી ઘર પસંદ કરો";
-    if (!(Number(f.amount) > 0)) e.amount = "રકમ ૦ થી વધુ હોવી જોઈએ";
+    if (kind) {
+      if (!String(f.item).trim()) e.item = "કઈ વસ્તુ આપી તે લખો";
+    } else if (!(Number(f.amount) > 0)) e.amount = "રકમ ૦ થી વધુ હોવી જોઈએ";
     setErr(e);
     if (Object.keys(e).length) return;
-    onSave({ ...f, amount: Number(f.amount), id: f.id || uid() });
+    if (kind) {
+      onSave({ ...f, inKind: true, item: f.item.trim(), itemQty: Number(f.itemQty) || 1, estValue: Number(f.estValue) || 0, amount: 0, mode: "વસ્તુ રૂપે", id: f.id || uid() });
+    } else {
+      const { item, itemQty, estValue, ...rest } = f;
+      onSave({ ...rest, inKind: false, amount: Number(f.amount), mode: f.mode === "વસ્તુ રૂપે" ? MODES[0] : f.mode, id: f.id || uid() });
+    }
   };
   return (
     <Modal title={isEdit ? "આવક સુધારો" : "આવક ઉમેરો"} onClose={onClose}>
       <Field label="આવકનો પ્રકાર">
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           {INCOME_TYPES.filter((t) => t !== PASS_TYPE).map((t) => (
-            <button type="button" key={t} className={`chip ${f.type === t ? "on" : ""}`} style={{ fontSize: 14 }} onClick={() => setF({ ...f, type: t })}>{t}</button>
+            <button type="button" key={t} className={`chip ${f.type === t ? "on" : ""}`} style={{ fontSize: 14 }} onClick={() => setF({ ...f, type: t, inKind: IN_KIND_TYPES.includes(t) ? f.inKind : false })}>{t}</button>
           ))}
         </div>
       </Field>
@@ -336,11 +366,36 @@ function CollectionForm({ initial, isEdit, festivals, members, collections, defa
           <Field label="ઘર નં. / સરનામું (વૈકલ્પિક)"><input className="inp" value={f.flat} onChange={set("flat")} /></Field>
         </div>
       )}
-      <div className="grid2">
-        <Field label="રકમ (₹)" error={err.amount}><input className="inp" type="number" min="0" inputMode="decimal" value={f.amount} onChange={set("amount")} /></Field>
-        <Field label="તારીખ"><input className="inp" type="date" value={f.date} onChange={set("date")} /></Field>
-      </div>
-      <Field label="ચુકવણી રીત"><select className="inp" value={f.mode} onChange={set("mode")}>{MODES.map((c) => <option key={c}>{c}</option>)}</select></Field>
+      {canKind && (
+        <Field label={`${f.type} શેમાં આપ્યું?`}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <button type="button" className={`chip ${!kind ? "on" : ""}`} onClick={() => setF({ ...f, inKind: false })}>₹ રોકડ / ઓનલાઈન રકમ</button>
+            <button type="button" className={`chip ${kind ? "on" : ""}`} onClick={() => setF({ ...f, inKind: true })}><Gift size={14} style={{ verticalAlign: "-2px" }} /> વસ્તુ રૂપે (મૂર્તિ, ભેટ વગેરે)</button>
+          </div>
+          {kind && <div className="hint">વસ્તુ રૂપે મળેલું રોકડ આવક કે સિલકમાં ઉમેરાશે નહીં. હિસાબમાં અલગ યાદીમાં દેખાશે.</div>}
+        </Field>
+      )}
+      {kind ? (
+        <>
+          <Field label="કઈ વસ્તુ આપી" error={err.item}>
+            <input className="inp" list="kind-items" value={f.item} onChange={set("item")} placeholder="દા.ત. ગણેશજીની મૂર્તિ" />
+            <datalist id="kind-items">{itemSuggestions(festName).map((x) => <option key={x} value={x} />)}</datalist>
+          </Field>
+          <div className="grid2">
+            <Field label="સંખ્યા"><Stepper label="સંખ્યા" value={f.itemQty} onChange={(v) => setF({ ...f, itemQty: v })} /></Field>
+            <Field label="અંદાજિત કિંમત ₹ (વૈકલ્પિક)"><input className="inp" type="number" min="0" value={f.estValue} onChange={set("estValue")} /></Field>
+          </div>
+          <Field label="તારીખ"><input className="inp" type="date" value={f.date} onChange={set("date")} /></Field>
+        </>
+      ) : (
+        <>
+          <div className="grid2">
+            <Field label="રકમ (₹)" error={err.amount}><input className="inp" type="number" min="0" inputMode="decimal" value={f.amount} onChange={set("amount")} /></Field>
+            <Field label="તારીખ"><input className="inp" type="date" value={f.date} onChange={set("date")} /></Field>
+          </div>
+          <Field label="ચુકવણી રીત"><select className="inp" value={MODES.includes(f.mode) ? f.mode : MODES[0]} onChange={set("mode")}>{MODES.map((c) => <option key={c}>{c}</option>)}</select></Field>
+        </>
+      )}
       <Field label="નોંધ"><textarea className="inp" rows="2" value={f.note} onChange={set("note")} placeholder="દા.ત. ગરબાના ઇનામ માટે, સ્ટોલ નં. 3" /></Field>
       <div className="actions"><button className="btn sec" onClick={onClose}>રદ કરો</button><button className="btn" onClick={save}>આવક સાચવો</button></div>
     </Modal>
@@ -497,7 +552,8 @@ function Report({ data, fest, festMap, sortedFests, paidFor, sponsoredBy }) {
   const collected = cols.reduce((s, c) => s + c.amount, 0);
   const members = [...data.members].sort((a, b) => a.order - b.order);
   const memberIds = new Set(members.map((m) => m.id));
-  const others = cols.filter((c) => incType(c) !== MEMBER_FUND || !c.memberId || !memberIds.has(c.memberId)).sort(byDate);
+  const others = cols.filter((c) => !isInKind(c) && (incType(c) !== MEMBER_FUND || !c.memberId || !memberIds.has(c.memberId))).sort(byDate);
+  const kinds = cols.filter(isInKind).sort(byDate);
   const fundTotal = cols.filter((c) => !others.includes(c)).reduce((s, c) => s + c.amount, 0);
   return (
     <div style={{ width: 794, padding: 36, background: "#fff", color: "#14303A", fontFamily: "'Hind Vadodara',sans-serif", fontSize: 13, lineHeight: 1.5 }}>
@@ -567,6 +623,17 @@ function Report({ data, fest, festMap, sortedFests, paidFor, sponsoredBy }) {
                 <tbody>
                   {others.map((c, i) => <tr key={c.id}><td style={td}>{i + 1}</td><td style={td}>{fmtDate(c.date)}</td><td style={td}>{incType(c)}</td><td style={td}>{c.name}{c.flat ? ` (${c.flat})` : ""}{noteOf(c) ? ` - ${noteOf(c)}` : ""}</td><td style={tdR}>{fmt(c.amount)}</td></tr>)}
                   <tr><td style={{ ...td, fontWeight: 700 }} colSpan={4}>કુલ અન્ય આવક</td><td style={{ ...tdR, fontWeight: 700 }}>{fmt(collected - fundTotal)}</td></tr>
+                </tbody>
+              </table>
+            </>
+          )}
+          {kinds.length > 0 && (
+            <>
+              <div style={{ fontFamily: "'Baloo Bhai 2'", fontSize: 19, fontWeight: 700, margin: "6px 0" }}>વસ્તુ રૂપે સ્પોન્સર / દાન <span style={{ fontSize: 12, fontWeight: 400 }}>(રોકડ હિસાબમાં ગણ્યું નથી)</span></div>
+              <table style={{ borderCollapse: "collapse", width: "100%", marginBottom: 16 }}>
+                <thead><tr><th style={{ ...th, width: 36 }}>ક્ર.</th><th style={th}>કોના તરફથી</th><th style={th}>વસ્તુ</th><th style={{ ...th, width: 60 }}>સંખ્યા</th><th style={{ ...th, width: 110 }}>અંદાજિત કિંમત</th></tr></thead>
+                <tbody>
+                  {kinds.map((c, i) => <tr key={c.id}><td style={td}>{i + 1}</td><td style={td}>{c.name}{c.flat ? ` (${c.flat})` : ""} · {incType(c)}</td><td style={td}>{c.item}{c.note ? ` - ${c.note}` : ""}</td><td style={tdR}>{c.itemQty || 1}</td><td style={tdR}>{c.estValue ? fmt(c.estValue) : "-"}</td></tr>)}
                 </tbody>
               </table>
             </>
@@ -676,7 +743,9 @@ async function buildExcel(data, festId) {
   const festMap = Object.fromEntries(fests.map((f) => [f.id, f]));
   const one = festId !== "all" ? festMap[festId] : null;
   const inFest = (x) => !one || x.festivalId === one.id;
-  const inc = data.collections.filter(inFest).sort(byDate);
+  const allInc = data.collections.filter(inFest).sort(byDate);
+  const inc = allInc.filter((c) => !isInKind(c)); // cash income only
+  const kinds = allInc.filter(isInKind);
   const exp = data.expenses.filter(inFest).sort(byDate);
   const fname = (id) => (festMap[id] ? `${festMap[id].name} ${festMap[id].year}` : "");
   const toDate = (d) => (d ? new Date(d + "T00:00:00") : null);
@@ -775,7 +844,7 @@ async function buildExcel(data, festId) {
     ws.getCell(2, 1).value = `રિપોર્ટ તારીખ: ${new Date().toLocaleDateString("en-IN")}  ·  આવક ${inc.length} એન્ટ્રી  ·  ખર્ચ ${exp.length} એન્ટ્રી`;
     ws.getCell(2, 1).font = { name: FONT, size: 10, color: { argb: "FF5D7178" } };
 
-    const section = ({ label, color, light, headers, groups, toRow, totalLabel }) => {
+    const section = ({ label, color, light, headers, groups, toRow, totalLabel, amountOf = (x) => x.amount }) => {
       ws.addRow([]);
       mergedRow(label, "", { bold: true, color: "FFFFFFFF", bg: color, size: 13 });
       const h = ws.addRow(keys.map((k) => headers[k] ?? ""));
@@ -797,7 +866,7 @@ async function buildExcel(data, festId) {
           row.getCell(amtCol).numFmt = RUPEE;
         });
         const last = ws.rowCount;
-        const v = g.items.reduce((a, x) => a + x.amount, 0);
+        const v = g.items.reduce((a, x) => a + (Number(amountOf(x)) || 0), 0);
         total += v;
         const sr = mergedRow(`${g.t} – કુલ`, { formula: `SUM(${amtLetter}${first}:${amtLetter}${last})`, result: v }, { bold: true });
         sr.getCell(amtCol).numFmt = RUPEE;
@@ -840,6 +909,18 @@ async function buildExcel(data, festId) {
       r.getCell(amtCol).numFmt = RUPEE;
       if (label.startsWith("બાકી") && bal < 0) r.getCell(amtCol).font = { name: FONT, bold: true, size: 13, color: { argb: "FFB42A2A" } };
     });
+
+    if (kinds.length) {
+      section({
+        label: "વસ્તુ રૂપે સ્પોન્સર / દાન – રોકડ આવક કે સિલકમાં ગણ્યું નથી",
+        color: "FF8A5A00", light: "FFFDF1D6",
+        headers: { no: "ક્ર.", date: "તારીખ", fest: "તહેવાર", name: "વસ્તુ", sub: "કોના તરફથી", by: "સંખ્યા", mode: "", note: "નોંધ", amount: "અંદાજિત કિંમત" },
+        groups: IN_KIND_TYPES.map((t) => ({ t, items: kinds.filter((c) => incType(c) === t) })).filter((g) => g.items.length),
+        toRow: (c) => ({ date: toDate(c.date), fest: fname(c.festivalId), name: c.item, sub: `${c.name}${c.flat ? ` (${c.flat})` : ""}`, by: c.itemQty || 1, mode: "", note: c.note || "", amount: Number(c.estValue) || null }),
+        amountOf: (c) => c.estValue,
+        totalLabel: "અંદાજિત કુલ કિંમત (ફક્ત માહિતી માટે)",
+      });
+    }
     ws.pageSetup = { paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: "1:2" };
   }
 
@@ -908,6 +989,22 @@ async function buildExcel(data, festId) {
     { key: "note", header: "નોંધ", width: 28 },
   ], inc.map((c) => ({ date: toDate(c.date), fest: fname(c.festivalId), type: incType(c), house: c.flat || "", name: c.name, mode: c.mode, amount: c.amount, note: noteOf(c) })), { totals: ["amount"] });
 
+  // Items given instead of cash
+  if (kinds.length) {
+    sheet("વસ્તુ રૂપે", [
+      { key: "date", header: "તારીખ", width: 12, date: true },
+      ...(one ? [] : [{ key: "fest", header: "તહેવાર", width: 20 }]),
+      { key: "type", header: "પ્રકાર", width: 12 },
+      { key: "name", header: "કોના તરફથી", width: 32 },
+      { key: "house", header: "ઘર નં.", width: 10 },
+      { key: "item", header: "વસ્તુ", width: 30 },
+      { key: "qty", header: "સંખ્યા", width: 9 },
+      { key: "est", header: "અંદાજિત કિંમત", width: 15, money: true },
+      { key: "note", header: "નોંધ", width: 26 },
+    ], kinds.map((c) => ({ date: toDate(c.date), fest: fname(c.festivalId), type: incType(c), name: c.name, house: c.flat || "", item: c.item, qty: c.itemQty || 1, est: Number(c.estValue) || null, note: c.note || "" })),
+    { totals: ["qty", "est"], note: "વસ્તુ રૂપે મળેલ સ્પોન્સર / દાન – રોકડ આવક કે સિલકમાં ગણ્યું નથી" });
+  }
+
   // Meal passes
   const passes = inc.filter((c) => incType(c) === PASS_TYPE);
   if (passes.length) {
@@ -955,7 +1052,7 @@ async function buildExcel(data, festId) {
     const members = [...data.members].sort((a, b) => a.order - b.order);
     const rows = members.map((m, i) => {
       const paid = sum(inc.filter((c) => c.memberId === m.id && incType(c) === MEMBER_FUND));
-      const sponsor = inc.some((c) => c.memberId === m.id && incType(c) === SPONSOR);
+      const sponsor = allInc.some((c) => c.memberId === m.id && incType(c) === SPONSOR);
       return paid || sponsor
         ? { no: i + 1, house: m.house, name: m.name, amount: paid || null, status: paid ? "મળ્યો" : "સ્પોન્સર" }
         : { no: i + 1, house: m.house, name: m.name, amount: null, status: "બાકી", __style: "pending" };
@@ -976,7 +1073,9 @@ async function buildExcel(data, festId) {
 
 // Detailed view of one festival: every income with name and every expense with label
 function FestivalView({ f, data, members, covered, busy, onExcel, onPdf, onClose }) {
-  const inc = data.collections.filter((c) => c.festivalId === f.id).sort(byDate);
+  const allInc = data.collections.filter((c) => c.festivalId === f.id).sort(byDate);
+  const inc = allInc.filter((c) => !isInKind(c));
+  const kinds = allInc.filter(isInKind);
   const exp = data.expenses.filter((e) => e.festivalId === f.id).sort(byDate);
   const tIn = inc.reduce((s, c) => s + c.amount, 0);
   const tEx = exp.reduce((s, e) => s + e.amount, 0);
@@ -1024,6 +1123,18 @@ function FestivalView({ f, data, members, covered, busy, onExcel, onPdf, onClose
             <div><small>કુલ પાસ</small><b>{pc.full + pc.half}</b></div>
             <div><small>પાસની આવક</small><b style={{ color: "var(--leaf)" }}>{fmt(pc.amount)}</b></div>
           </div>
+        </>
+      )}
+
+      {kinds.length > 0 && (
+        <>
+          <div className="sec-h"><span>વસ્તુ રૂપે સ્પોન્સર / દાન ({kinds.length})</span><span style={{ fontSize: 13, fontWeight: 400, color: "var(--muted)" }}>રોકડ હિસાબમાં ગણ્યું નથી</span></div>
+          <div className="vt-wrap"><table className="vt">
+            <thead><tr><th>તારીખ</th><th>કોના તરફથી</th><th>પ્રકાર</th><th>વસ્તુ</th><th className="r">સંખ્યા</th><th className="r">અંદાજિત કિંમત</th></tr></thead>
+            <tbody>
+              {kinds.map((c) => <tr key={c.id}><td>{fmtDate(c.date)}</td><td>{c.name}{c.flat ? ` (${c.flat})` : ""}</td><td>{incType(c)}</td><td>{c.item}{c.note && <div style={{ fontSize: 12, color: "var(--muted)" }}>{c.note}</div>}</td><td className="r">{c.itemQty || 1}</td><td className="r">{c.estValue ? fmt(c.estValue) : "-"}</td></tr>)}
+            </tbody>
+          </table></div>
         </>
       )}
 
@@ -1297,8 +1408,8 @@ export default function App() {
       `તહેવાર: ${festMap[c.festivalId] ? `${festMap[c.festivalId].name} ${festMap[c.festivalId].year}` : ""}`,
       `પ્રકાર: ${incType(c)}`,
       passText(c) ? `પાસ: ${passText(c)}` : null,
-      `રકમ: ${fmt(c.amount)}`,
-      `તારીખ: ${fmtDate(c.date)} · ${c.mode}`,
+      isInKind(c) ? kindText(c) : `રકમ: ${fmt(c.amount)}`,
+      isInKind(c) ? `તારીખ: ${fmtDate(c.date)}` : `તારીખ: ${fmtDate(c.date)} · ${c.mode}`,
       c.note ? `નોંધ: ${c.note}` : null,
       "",
       "આપના સહયોગ બદલ આભાર 🙏",
@@ -1543,12 +1654,14 @@ export default function App() {
                     <div className="grow">
                       <div className="t">{c.flat && <span className="tag">{c.flat}</span>}{c.name}</div>
                       <div className="s"><span className="tag" style={incType(c) === MEMBER_FUND ? undefined : { background: "#FDF1D6", color: "#8A5A00" }}>{incType(c)}</span></div>
-                      <div className="s">{fest === "all" && `${festMap[c.festivalId]?.name || ""} · `}{fmtDate(c.date)} · {c.mode}{noteOf(c) && ` · ${noteOf(c)}`}</div>
+                      <div className="s">{fest === "all" && `${festMap[c.festivalId]?.name || ""} · `}{fmtDate(c.date)}{!isInKind(c) && ` · ${c.mode}`}{noteOf(c) && ` · ${noteOf(c)}`}</div>
                     </div>
-                    <div className="amt" style={{ color: "var(--leaf)" }}>{fmt(c.amount)}</div>
+                    {isInKind(c)
+                      ? <div className="amt" style={{ color: "#8A5A00", display: "flex", alignItems: "center", gap: 4 }} title="રોકડ હિસાબમાં ગણ્યું નથી"><Gift size={16} />વસ્તુ</div>
+                      : <div className="amt" style={{ color: "var(--leaf)" }}>{fmt(c.amount)}</div>}
                     <a className="icon" aria-label="WhatsApp પહોંચ" title="WhatsApp પર પહોંચ મોકલો" href={receiptLink(c)} target="_blank" rel="noopener noreferrer"><MessageCircle size={15} /></a>
                     <button className="icon" aria-label="સુધારો" onClick={() => setModal({ type: incType(c) === PASS_TYPE ? "pass" : "col", item: c })}><Pencil size={15} /></button>
-                    <button className="icon del" aria-label="કાઢી નાખો" onClick={() => setModal({ type: "del", key: "collections", id: c.id, text: `${c.name || c.flat} ની ${fmt(c.amount)} આવક (${incType(c)}) કાઢી નાખવામાં આવશે.`, msg: "આવક કાઢી નાખી" })}><Trash2 size={15} /></button>
+                    <button className="icon del" aria-label="કાઢી નાખો" onClick={() => setModal({ type: "del", key: "collections", id: c.id, text: `${c.name || c.flat} ની ${isInKind(c) ? kindText(c) : fmt(c.amount)} આવક (${incType(c)}) કાઢી નાખવામાં આવશે.`, msg: "આવક કાઢી નાખી" })}><Trash2 size={15} /></button>
                   </div>
                 ))}
             </div>
