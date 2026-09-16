@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Plus, Pencil, Trash2, X, Search, Download, Upload, Wallet, HandCoins, Scale, CalendarDays, LayoutDashboard, Receipt, PartyPopper, Users, FileText, Share2, MessageCircle, Lock, Unlock, RefreshCw, Cloud, Eye, FileSpreadsheet, UtensilsCrossed, Minus, Gift } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Search, Download, Upload, Wallet, HandCoins, Scale, CalendarDays, LayoutDashboard, Receipt, PartyPopper, Users, FileText, Share2, MessageCircle, Lock, Unlock, RefreshCw, Cloud, Eye, FileSpreadsheet, UtensilsCrossed, Minus, Gift, BellRing, CheckCircle2 } from "lucide-react";
 
 const STORE_KEY = "karmbhumi-society-v1";      // shared: visible to everyone using the app
 const ADMIN_KEY = "karmbhumi-admin-pin";        // personal: this device's unlocked PIN hash
@@ -33,6 +33,11 @@ const byDate = (a, b) => (a.date || "").localeCompare(b.date || "");
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const fmt = (n) => "₹" + Number(n || 0).toLocaleString("en-IN");
 const today = () => new Date().toISOString().slice(0, 10);
+// Meal pass payment: `amount` = cash actually received (counts as income),
+// `passTotal` = full price of the passes. Older entries have no passTotal = fully paid.
+const passTotalOf = (c) => Number(c.passTotal ?? c.amount) || 0;
+const passDue = (c) => ((c.type || "") === PASS_TYPE ? Math.max(0, passTotalOf(c) - (Number(c.amount) || 0)) : 0);
+
 // "ફુલ 2 × ₹300 + હાફ 1 × ₹150 (સોસાયટી સભ્ય)" for meal-pass entries, "" for everything else
 const passText = (c) => {
   if ((c.type || "") !== PASS_TYPE) return "";
@@ -40,7 +45,11 @@ const passText = (c) => {
     c.fullQty ? `ફુલ ${c.fullQty} × ${fmt(c.rateFull)}` : null,
     c.halfQty ? `હાફ ${c.halfQty} × ${fmt(c.rateHalf)}` : null,
   ].filter(Boolean).join(" + ");
-  return `${parts} (${PASS_FOR[c.passFor] || ""})${c.guestLabel ? ` · મહેમાન: ${c.guestLabel}` : ""}`;
+  const due = passDue(c);
+  return `${parts} (${PASS_FOR[c.passFor] || ""})`
+    + (c.passNo ? ` · પાસ નં. ${c.passNo}` : "")
+    + (c.guestLabel ? ` · મહેમાન: ${c.guestLabel}` : "")
+    + (due ? ` · કુલ ${fmt(passTotalOf(c))}, મળ્યા ${fmt(c.amount)}, બાકી ${fmt(due)}` : "");
 };
 // Sponsor / donation given as an item (murti, gift, prizes...) instead of cash.
 // Stored with amount 0 so cash totals and balance never include it.
@@ -64,16 +73,19 @@ const itemSuggestions = (festName = "") => {
 };
 const noteOf = (c) => [passText(c), kindText(c), c.note].filter(Boolean).join(" · ");
 const passCounts = (list) => {
-  const r = { society: { full: 0, half: 0, amount: 0 }, outside: { full: 0, half: 0, amount: 0 } };
+  const blank = () => ({ full: 0, half: 0, amount: 0, total: 0, due: 0, dueCount: 0 });
+  const r = { society: blank(), outside: blank() };
   list.filter((c) => (c.type || "") === PASS_TYPE).forEach((c) => {
     const k = c.passFor === "outside" ? "outside" : "society";
     r[k].full += Number(c.fullQty) || 0;
     r[k].half += Number(c.halfQty) || 0;
-    r[k].amount += c.amount;
+    r[k].amount += Number(c.amount) || 0;
+    r[k].total += passTotalOf(c);
+    const d = passDue(c);
+    r[k].due += d;
+    if (d) r[k].dueCount += 1;
   });
-  r.full = r.society.full + r.outside.full;
-  r.half = r.society.half + r.outside.half;
-  r.amount = r.society.amount + r.outside.amount;
+  ["full", "half", "amount", "total", "due", "dueCount"].forEach((x) => { r[x] = r.society[x] + r.outside[x]; });
   return r;
 };
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("gu-IN", { day: "numeric", month: "short", year: "numeric" }) : "-");
@@ -225,6 +237,9 @@ const css = `
 .total-box b{font-family:'Baloo Bhai 2';font-size:28px}
 .hint{font-size:12px;color:var(--muted);margin-top:3px}
 .linkbtn{background:none;border:none;color:var(--peacock);text-decoration:underline;padding:0;font-size:12px}
+.due{color:var(--kumkum);font-size:13px;font-weight:600;white-space:nowrap}
+.amtcol{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.duebox{background:#FBE9E9;color:var(--kumkum);border-radius:8px;padding:8px 12px;font-weight:600;margin-bottom:12px;display:flex;justify-content:space-between}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:8px;z-index:60}
 .fest-card{display:flex;gap:14px;align-items:center;padding:14px 0;border-top:1px solid var(--line)}
 .fest-card:first-child{border-top:none}
@@ -425,11 +440,17 @@ function PassForm({ initial, isEdit, festivals, festMap, members, defaultFest, o
   });
   const [err, setErr] = useState({});
   const [mq, setMq] = useState("");
+  const initTotal = initial ? passTotalOf(initial) : 0;
+  const initPaid = initial ? Number(initial.amount) || 0 : 0;
+  const [pay, setPay] = useState(!initial || initPaid >= initTotal ? "full" : initPaid === 0 ? "pending" : "part");
+  const [paidAmt, setPaidAmt] = useState(initial && initPaid > 0 && initPaid < initTotal ? String(initPaid) : "");
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const shown = members.filter((m) => !mq || m.house.toLowerCase().includes(mq.toLowerCase()) || m.name.toLowerCase().includes(mq.toLowerCase()));
   const std = defaultRates(f.festivalId, f.passFor);
   const custom = Number(f.rateFull) !== std.rateFull || Number(f.rateHalf) !== std.rateHalf;
   const total = (Number(f.fullQty) || 0) * (Number(f.rateFull) || 0) + (Number(f.halfQty) || 0) * (Number(f.rateHalf) || 0);
+  const paid = pay === "full" ? total : pay === "pending" ? 0 : Math.min(total, Number(paidAmt) || 0);
+  const due = Math.max(0, total - paid);
 
   const changeFest = (fid) => setF({ ...f, festivalId: fid, ...defaultRates(fid, f.passFor) });
   const changeFor = (pf) => setF({ ...f, passFor: pf, memberId: "", flat: "", name: "", guestOf: "", guestLabel: "", ...defaultRates(f.festivalId, pf) });
@@ -450,13 +471,16 @@ function PassForm({ initial, isEdit, festivals, festMap, members, defaultFest, o
     if (!((Number(f.fullQty) || 0) + (Number(f.halfQty) || 0))) e.qty = "ઓછામાં ઓછો એક પાસ પસંદ કરો";
     if (Number(f.fullQty) > 0 && !(Number(f.rateFull) > 0)) e.rate = "ફુલ પાસનો દર લખો";
     if (Number(f.halfQty) > 0 && !(Number(f.rateHalf) > 0)) e.rate = "હાફ પાસનો દર લખો";
+    if (pay === "part" && !(Number(paidAmt) > 0 && Number(paidAmt) < total)) e.paid = `મળેલ રકમ ₹1 થી ${fmt(Math.max(0, total - 1))} વચ્ચે લખો`;
     setErr(e);
     if (Object.keys(e).length) return;
     onSave({
       ...f, type: PASS_TYPE, id: f.id || uid(),
       fullQty: Number(f.fullQty) || 0, halfQty: Number(f.halfQty) || 0,
       rateFull: Number(f.rateFull) || 0, rateHalf: Number(f.rateHalf) || 0,
-      amount: total, flat: f.passFor === "society" ? f.flat : "",
+      amount: paid, passTotal: total, passNo: String(f.passNo || "").trim(),
+      mode: paid > 0 ? (MODES.includes(f.mode) ? f.mode : MODES[0]) : "બાકી",
+      flat: f.passFor === "society" ? f.flat : "",
     });
   };
 
@@ -512,12 +536,58 @@ function PassForm({ initial, isEdit, festivals, festMap, members, defaultFest, o
       {(err.qty || err.rate) && <div className="err" style={{ marginBottom: 8 }}>{err.qty || err.rate}</div>}
       <div className="total-box"><span>કુલ રકમ</span><b>{fmt(total)}</b></div>
 
+      <Field label="પેમેન્ટ" error={err.paid}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <button type="button" className={`chip ${pay === "full" ? "on" : ""}`} onClick={() => setPay("full")}>પૂરા પૈસા મળ્યા</button>
+          <button type="button" className={`chip ${pay === "part" ? "on" : ""}`} onClick={() => setPay("part")}>થોડા પૈસા મળ્યા</button>
+          <button type="button" className={`chip ${pay === "pending" ? "on" : ""}`} onClick={() => setPay("pending")}>પૈસા બાકી (પછી આપશે)</button>
+        </div>
+      </Field>
+      {pay === "part" && <Field label="અત્યારે મળેલ રકમ (₹)"><input className="inp" type="number" min="0" value={paidAmt} onChange={(e) => setPaidAmt(e.target.value)} autoFocus /></Field>}
+      {due > 0 && <div className="duebox"><span>બાકી પેમેન્ટ</span><span>{fmt(due)}</span></div>}
+
       <div className="grid2">
         <Field label="તારીખ"><input className="inp" type="date" value={f.date} onChange={set("date")} /></Field>
-        <Field label="ચુકવણી રીત"><select className="inp" value={f.mode} onChange={set("mode")}>{MODES.map((c) => <option key={c}>{c}</option>)}</select></Field>
+        <Field label="પાસ નંબર (વૈકલ્પિક)"><input className="inp" value={f.passNo || ""} onChange={set("passNo")} placeholder="દા.ત. 101-103" /></Field>
       </div>
-      <Field label="નોંધ"><input className="inp" value={f.note} onChange={set("note")} placeholder="દા.ત. પાસ નં. 101-103" /></Field>
+      {paid > 0 && <Field label="ચુકવણી રીત"><select className="inp" value={MODES.includes(f.mode) ? f.mode : MODES[0]} onChange={set("mode")}>{MODES.map((c) => <option key={c}>{c}</option>)}</select></Field>}
+      <Field label="નોંધ"><input className="inp" value={f.note} onChange={set("note")} placeholder="દા.ત. રવિવારે પૈસા આપશે" /></Field>
       <div className="actions"><button className="btn sec" onClick={onClose}>રદ કરો</button><button className="btn" onClick={save}>પાસ સાચવો</button></div>
+    </Modal>
+  );
+}
+
+function PassPayModal({ c, onSave, onClose }) {
+  const due = passDue(c);
+  const [amt, setAmt] = useState(String(due));
+  const [date, setDate] = useState(today());
+  const [mode, setMode] = useState(MODES[0]);
+  const [err, setErr] = useState("");
+  const save = () => {
+    const a = Number(amt);
+    if (!(a > 0)) return setErr("રકમ લખો");
+    if (a > due) return setErr(`બાકી રકમ ${fmt(due)} કરતાં વધુ ન હોઈ શકે`);
+    onSave({ ...c, amount: (Number(c.amount) || 0) + a, mode, payments: [...(c.payments || []), { amount: a, date, mode }] });
+  };
+  return (
+    <Modal title="ભોજન પાસ – પૈસા મળ્યા" onClose={onClose}>
+      <p style={{ marginTop: 0 }}><b>{c.flat ? `${c.flat} · ` : ""}{c.name}</b><br /><span style={{ color: "var(--muted)", fontSize: 14 }}>{passText(c)}</span></p>
+      <div className="mini">
+        <div><small>કુલ</small><b>{fmt(passTotalOf(c))}</b></div>
+        <div><small>મળ્યા</small><b style={{ color: "var(--leaf)" }}>{fmt(c.amount)}</b></div>
+        <div><small>બાકી</small><b style={{ color: "var(--kumkum)" }}>{fmt(due)}</b></div>
+      </div>
+      <Field label="હવે મળેલ રકમ (₹)" error={err}>
+        <input className="inp" type="number" min="0" value={amt} onChange={(e) => setAmt(e.target.value)} autoFocus />
+      </Field>
+      <div className="grid2">
+        <Field label="તારીખ"><input className="inp" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+        <Field label="ચુકવણી રીત"><select className="inp" value={mode} onChange={(e) => setMode(e.target.value)}>{MODES.map((m) => <option key={m}>{m}</option>)}</select></Field>
+      </div>
+      {c.payments?.length > 0 && (
+        <div className="hint" style={{ marginBottom: 8 }}>પહેલાંની ચુકવણી: {c.payments.map((p) => `${fmtDate(p.date)} ${fmt(p.amount)} (${p.mode})`).join(" · ")}</div>
+      )}
+      <div className="actions"><button className="btn sec" onClick={onClose}>રદ કરો</button><button className="btn" onClick={save}><CheckCircle2 size={16} />પેમેન્ટ સાચવો</button></div>
     </Modal>
   );
 }
@@ -606,10 +676,10 @@ function Report({ data, fest, festMap, sortedFests, paidFor, sponsoredBy }) {
               <>
                 <div style={{ fontFamily: "'Baloo Bhai 2'", fontSize: 19, fontWeight: 700, margin: "6px 0" }}>ભોજન પાસ સારાંશ</div>
                 <table style={{ borderCollapse: "collapse", width: "100%", marginBottom: 16 }}>
-                  <thead><tr><th style={th}>કોના માટે</th><th style={th}>ફુલ પાસ</th><th style={th}>હાફ પાસ</th><th style={th}>રકમ</th></tr></thead>
+                  <thead><tr><th style={th}>કોના માટે</th><th style={th}>ફુલ પાસ</th><th style={th}>હાફ પાસ</th><th style={th}>મળેલ રકમ</th><th style={th}>બાકી</th></tr></thead>
                   <tbody>
-                    {["society", "outside"].map((k) => <tr key={k}><td style={td}>{PASS_FOR[k]}</td><td style={tdR}>{pc[k].full}</td><td style={tdR}>{pc[k].half}</td><td style={tdR}>{fmt(pc[k].amount)}</td></tr>)}
-                    <tr><td style={{ ...td, fontWeight: 700 }}>કુલ</td><td style={{ ...tdR, fontWeight: 700 }}>{pc.full}</td><td style={{ ...tdR, fontWeight: 700 }}>{pc.half}</td><td style={{ ...tdR, fontWeight: 700 }}>{fmt(pc.amount)}</td></tr>
+                    {["society", "outside"].map((k) => <tr key={k}><td style={td}>{PASS_FOR[k]}</td><td style={tdR}>{pc[k].full}</td><td style={tdR}>{pc[k].half}</td><td style={tdR}>{fmt(pc[k].amount)}</td><td style={{ ...tdR, color: pc[k].due ? "#B42A2A" : undefined }}>{fmt(pc[k].due)}</td></tr>)}
+                    <tr><td style={{ ...td, fontWeight: 700 }}>કુલ</td><td style={{ ...tdR, fontWeight: 700 }}>{pc.full}</td><td style={{ ...tdR, fontWeight: 700 }}>{pc.half}</td><td style={{ ...tdR, fontWeight: 700 }}>{fmt(pc.amount)}</td><td style={{ ...tdR, fontWeight: 700, color: pc.due ? "#B42A2A" : undefined }}>{fmt(pc.due)}</td></tr>
                   </tbody>
                 </table>
               </>
@@ -909,6 +979,12 @@ async function buildExcel(data, festId) {
       r.getCell(amtCol).numFmt = RUPEE;
       if (label.startsWith("બાકી") && bal < 0) r.getCell(amtCol).font = { name: FONT, bold: true, size: 13, color: { argb: "FFB42A2A" } };
     });
+    const passDueTotal = inc.reduce((a, c) => a + passDue(c), 0);
+    if (passDueTotal) {
+      const r = mergedRow("ભોજન પાસના બાકી પૈસા – હજુ આવવાના (ઉપરની આવક / સિલકમાં નથી)", passDueTotal, { bold: true, color: "FFB42A2A" });
+      r.getCell(1).alignment = { horizontal: "right" };
+      r.getCell(amtCol).numFmt = RUPEE;
+    }
 
     if (kinds.length) {
       section({
@@ -1020,17 +1096,35 @@ async function buildExcel(data, festId) {
       { key: "rateFull", header: "ફુલ દર", width: 11, money: true },
       { key: "halfQty", header: "હાફ પાસ", width: 10 },
       { key: "rateHalf", header: "હાફ દર", width: 11, money: true },
-      { key: "amount", header: "રકમ", width: 13, money: true },
+      { key: "total", header: "કુલ રકમ", width: 13, money: true },
+      { key: "amount", header: "મળેલ રકમ", width: 13, money: true },
+      { key: "due", header: "બાકી", width: 12, money: true },
+      { key: "status", header: "પેમેન્ટ", width: 12 },
+      { key: "passNo", header: "પાસ નં.", width: 12 },
       { key: "mode", header: "ચુકવણી રીત", width: 13 },
       { key: "note", header: "નોંધ", width: 22 },
     ], passes.map((c) => ({
       date: toDate(c.date), fest: fname(c.festivalId), for: PASS_FOR[c.passFor] || "", name: c.name,
       house: c.flat || c.phone || "", guest: c.guestLabel || "",
       fullQty: c.fullQty || 0, rateFull: c.fullQty ? c.rateFull : null, halfQty: c.halfQty || 0, rateHalf: c.halfQty ? c.rateHalf : null,
-      amount: c.amount, mode: c.mode, note: c.note || "",
+      total: passTotalOf(c), amount: c.amount, due: passDue(c) || null,
+      status: !passDue(c) ? "પૂરું" : c.amount ? "થોડું બાકી" : "બાકી",
+      passNo: c.passNo || "", mode: c.amount ? c.mode : "", note: c.note || "",
     })), {
-      totals: ["fullQty", "halfQty", "amount"],
-      note: `સોસાયટી: ફુલ ${pc.society.full}, હાફ ${pc.society.half}  ·  બહારના: ફુલ ${pc.outside.full}, હાફ ${pc.outside.half}  ·  કુલ ${pc.full} ફુલ + ${pc.half} હાફ = ${pc.full + pc.half} પાસ`,
+      totals: ["fullQty", "halfQty", "total", "amount", "due"],
+      note: `સોસાયટી: ફુલ ${pc.society.full}, હાફ ${pc.society.half}  ·  બહારના: ફુલ ${pc.outside.full}, હાફ ${pc.outside.half}  ·  કુલ ${pc.full + pc.half} પાસ  ·  બાકી પેમેન્ટ ${fmt(pc.due)} (${pc.dueCount} એન્ટ્રી)`,
+    });
+  }
+
+  if (wb.getWorksheet("ભોજન પાસ")) {
+    const wsP = wb.getWorksheet("ભોજન પાસ");
+    wsP.eachRow((row, n) => {
+      if (n < 4) return;
+      const st = row.getCell("status").value;
+      if (st === "બાકી" || st === "થોડું બાકી") {
+        row.getCell("status").font = { name: FONT, bold: true, color: { argb: "FFB42A2A" } };
+        row.getCell("due").font = { name: FONT, bold: true, color: { argb: "FFB42A2A" } };
+      }
     });
   }
 
@@ -1121,8 +1215,14 @@ function FestivalView({ f, data, members, covered, busy, onExcel, onPdf, onClose
             <div><small>સોસાયટી – ફુલ / હાફ</small><b>{pc.society.full} / {pc.society.half}</b></div>
             <div><small>બહારના – ફુલ / હાફ</small><b>{pc.outside.full} / {pc.outside.half}</b></div>
             <div><small>કુલ પાસ</small><b>{pc.full + pc.half}</b></div>
-            <div><small>પાસની આવક</small><b style={{ color: "var(--leaf)" }}>{fmt(pc.amount)}</b></div>
+            <div><small>પાસની આવક (મળેલ)</small><b style={{ color: "var(--leaf)" }}>{fmt(pc.amount)}</b></div>
+            {pc.due > 0 && <div><small>પાસના બાકી પૈસા</small><b style={{ color: "var(--kumkum)" }}>{fmt(pc.due)}</b></div>}
           </div>
+          {pc.due > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 18 }}>
+              {allInc.filter((c) => passDue(c) > 0).map((c) => <span key={c.id} className="tag" style={{ background: "#FBE9E9", color: "var(--kumkum)", fontSize: 13 }}>{c.flat ? `${c.flat} · ` : ""}{c.name} · બાકી {fmt(passDue(c))}</span>)}
+            </div>
+          )}
         </>
       )}
 
@@ -1383,6 +1483,7 @@ export default function App() {
 
   const [incFilter, setIncFilter] = useState("all");
   const [passFilter, setPassFilter] = useState("all");
+  const [passPay, setPassPay] = useState("all");
   const downloadExcel = async (festId = fest) => {
     setBusy(true);
     try {
@@ -1395,6 +1496,26 @@ export default function App() {
       setToast("Excel બની શકી નહીં, ફરી પ્રયાસ કરો");
     }
     setBusy(false);
+  };
+  const reminderLink = (c) => {
+    const m = data.members.find((x) => x.id === c.memberId);
+    const digits = String(m?.phone || c.phone || "").replace(/\D/g, "");
+    const num = digits.length === 10 ? "91" + digits : digits;
+    const f = festMap[c.festivalId];
+    const text = [
+      "*કર્મભૂમિ સોસાયટી, પાટણ*",
+      "*ભોજન પાસ – બાકી રકમની યાદી*",
+      "",
+      `નામ: ${c.name}${c.flat ? ` (ઘર ${c.flat})` : ""}`,
+      f ? `તહેવાર: ${f.name} ${f.year}` : null,
+      `પાસ: ${[c.fullQty ? `ફુલ ${c.fullQty}` : null, c.halfQty ? `હાફ ${c.halfQty}` : null].filter(Boolean).join(" + ")}${c.passNo ? ` (પાસ નં. ${c.passNo})` : ""}`,
+      `કુલ રકમ: ${fmt(passTotalOf(c))}`,
+      c.amount ? `મળેલ: ${fmt(c.amount)}` : null,
+      `*બાકી રકમ: ${fmt(passDue(c))}*`,
+      "",
+      "કૃપા કરીને બાકી રકમ જમા કરાવશો. આભાર 🙏",
+    ].filter((x) => x !== null).join("\n");
+    return `https://wa.me/${num}?text=${encodeURIComponent(text)}`;
   };
   const receiptLink = (c) => {
     const m = data.members.find((x) => x.id === c.memberId);
@@ -1573,6 +1694,20 @@ export default function App() {
               </div>
             )}
 
+            {fest !== "all" && passCounts(cols).due > 0 && (
+              <div className="panel">
+                <h3 style={{ display: "flex", alignItems: "center", gap: 8 }}><UtensilsCrossed size={18} />ભોજન પાસ – બાકી પેમેન્ટ: <span style={{ color: "var(--kumkum)" }}>{fmt(passCounts(cols).due)}</span></h3>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {cols.filter((c) => passDue(c) > 0).map((c) => (
+                    <button key={c.id} className="chip" style={{ fontSize: 13 }} onClick={() => isAdmin && setModal({ type: "passpay", id: c.id })}>
+                      {c.flat || c.name} · <b style={{ color: "var(--kumkum)" }}>{fmt(passDue(c))}</b>
+                    </button>
+                  ))}
+                </div>
+                {isAdmin && <div className="s" style={{ fontSize: 13, color: "var(--muted)", marginTop: 8 }}>નામ પર દબાવીને પૈસા મળ્યાની નોંધ કરો.</div>}
+              </div>
+            )}
+
             {incByType.length > 0 && (
               <div className="panel">
                 <h3>પ્રકાર મુજબ આવક</h3>
@@ -1652,7 +1787,7 @@ export default function App() {
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><b>{colList.length} એન્ટ્રી</b><b style={{ color: "var(--leaf)" }}>{fmt(colList.reduce((s, c) => s + c.amount, 0))}</b></div>
               {passEntries.length > 0 && incFilter === "all" && (
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", background: "var(--bg)", borderRadius: 8, padding: "8px 12px", margin: "4px 0 8px", fontSize: 14 }}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}><UtensilsCrossed size={15} />ભોજન પાસની આવક <b>{fmt(passTotal)}</b> ({passEntries.length} એન્ટ્રી) કુલ આવકમાં ગણાય છે, પણ અહીં યાદીમાં નથી.</span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}><UtensilsCrossed size={15} />ભોજન પાસની આવક <b>{fmt(passTotal)}</b> ({passEntries.length} એન્ટ્રી) કુલ આવકમાં ગણાય છે, પણ અહીં યાદીમાં નથી.{passEntries.some((c) => passDue(c)) && <span className="due"> બાકી પેમેન્ટ {fmt(passEntries.reduce((a, c) => a + passDue(c), 0))}</span>}</span>
                   <button className="linkbtn" style={{ fontSize: 14 }} onClick={() => { setTab("passes"); setQ(""); }}>ભોજન પાસ ટૅબમાં જુઓ →</button>
                 </div>
               )}
@@ -1679,7 +1814,9 @@ export default function App() {
         {loaded && tab === "passes" && (() => {
           const all = cols.filter((c) => incType(c) === PASS_TYPE);
           const list = all
-            .filter((c) => (passFilter === "all" || c.passFor === passFilter) && match(c, ["name", "flat", "phone", "note", "guestLabel"]))
+            .filter((c) => (passFilter === "all" || c.passFor === passFilter)
+              && (passPay === "all" || (passPay === "due" ? passDue(c) > 0 : passDue(c) === 0))
+              && match(c, ["name", "flat", "phone", "note", "guestLabel", "passNo"]))
             .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
           const pc = passCounts(all);
           const cf = fest !== "all" ? festMap[fest] : null;
@@ -1704,9 +1841,10 @@ export default function App() {
               )}
 
               <div className="stats" style={{ marginBottom: 14 }}>
-                <div className="stat" style={{ "--c": "var(--peacock)" }}><div className="lbl">સોસાયટી સભ્ય</div><div className="num">{pc.society.full} ફુલ · {pc.society.half} હાફ</div><div style={{ fontSize: 13, color: "var(--muted)" }}>{fmt(pc.society.amount)}</div></div>
-                <div className="stat" style={{ "--c": "var(--marigold)" }}><div className="lbl">બહારના</div><div className="num">{pc.outside.full} ફુલ · {pc.outside.half} હાફ</div><div style={{ fontSize: 13, color: "var(--muted)" }}>{fmt(pc.outside.amount)}</div></div>
-                <div className="stat" style={{ "--c": "var(--leaf)" }}><div className="lbl">કુલ પાસ (રસોઈ માટે)</div><div className="num">{pc.full + pc.half}</div><div style={{ fontSize: 13, color: "var(--muted)" }}>{pc.full} ફુલ + {pc.half} હાફ · {fmt(pc.amount)}</div></div>
+                <div className="stat" style={{ "--c": "var(--peacock)" }}><div className="lbl">સોસાયટી સભ્ય</div><div className="num">{pc.society.full} ફુલ · {pc.society.half} હાફ</div><div style={{ fontSize: 13, color: "var(--muted)" }}>મળ્યા {fmt(pc.society.amount)}{pc.society.due > 0 && <span className="due"> · બાકી {fmt(pc.society.due)}</span>}</div></div>
+                <div className="stat" style={{ "--c": "var(--marigold)" }}><div className="lbl">બહારના</div><div className="num">{pc.outside.full} ફુલ · {pc.outside.half} હાફ</div><div style={{ fontSize: 13, color: "var(--muted)" }}>મળ્યા {fmt(pc.outside.amount)}{pc.outside.due > 0 && <span className="due"> · બાકી {fmt(pc.outside.due)}</span>}</div></div>
+                <div className="stat" style={{ "--c": "var(--leaf)" }}><div className="lbl">કુલ પાસ (રસોઈ માટે)</div><div className="num">{pc.full + pc.half}</div><div style={{ fontSize: 13, color: "var(--muted)" }}>{pc.full} ફુલ + {pc.half} હાફ · મળ્યા {fmt(pc.amount)}</div></div>
+                <div className="stat" style={{ "--c": "var(--kumkum)", cursor: "pointer" }} onClick={() => setPassPay("due")}><div className="lbl"><BellRing size={15} />બાકી પેમેન્ટ</div><div className="num" style={{ color: pc.due ? "var(--kumkum)" : undefined }}>{fmt(pc.due)}</div><div style={{ fontSize: 13, color: "var(--muted)" }}>{pc.dueCount} એન્ટ્રી · કુલ વેચાણ {fmt(pc.total)}</div></div>
               </div>
 
               <div className="toolbar">
@@ -1714,15 +1852,20 @@ export default function App() {
                 <select className="inp" style={{ width: "auto" }} value={passFilter} onChange={(e) => setPassFilter(e.target.value)}>
                   <option value="all">બધા</option>{Object.entries(PASS_FOR).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
+                <select className="inp" style={{ width: "auto" }} value={passPay} onChange={(e) => setPassPay(e.target.value)}>
+                  <option value="all">બધા પેમેન્ટ</option>
+                  <option value="due">પેમેન્ટ બાકી</option>
+                  <option value="paid">પૂરું ચૂકવેલ</option>
+                </select>
                 <button className="btn sec" disabled={busy} onClick={() => downloadExcel()}><FileSpreadsheet size={16} />Excel</button>
                 <button className="btn" onClick={() => noFests ? needFest() : setModal({ type: "pass" })}><Plus size={16} />પાસ આપો</button>
               </div>
               <div className="panel" style={{ marginTop: 0 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
                   <b>{list.length} એન્ટ્રી · {list.reduce((a, c) => a + (c.fullQty || 0), 0)} ફુલ + {list.reduce((a, c) => a + (c.halfQty || 0), 0)} હાફ</b>
-                  <b style={{ color: "var(--leaf)" }}>{fmt(list.reduce((a, c) => a + c.amount, 0))}</b>
+                  <span><b style={{ color: "var(--leaf)" }}>{fmt(list.reduce((a, c) => a + c.amount, 0))}</b>{list.some((c) => passDue(c)) && <span className="due"> · બાકી {fmt(list.reduce((a, c) => a + passDue(c), 0))}</span>}</span>
                 </div>
-                {list.length === 0 ? <div className="empty">{q || passFilter !== "all" ? "શોધ મુજબ કોઈ પાસ મળ્યો નહીં." : "હજુ કોઈ ભોજન પાસ આપ્યો નથી. ઉપર \"પાસ આપો\" દબાવો."}</div> :
+                {list.length === 0 ? <div className="empty">{q || passFilter !== "all" || passPay !== "all" ? "શોધ મુજબ કોઈ પાસ મળ્યો નહીં." : "હજુ કોઈ ભોજન પાસ આપ્યો નથી. ઉપર \"પાસ આપો\" દબાવો."}</div> :
                   list.map((c) => (
                     <div className="row" key={c.id}>
                       <div className="grow">
@@ -1731,12 +1874,18 @@ export default function App() {
                           <span className="tag" style={c.passFor === "outside" ? { background: "#FDF1D6", color: "#8A5A00" } : undefined}>{PASS_FOR[c.passFor]}</span>
                           {c.fullQty ? `ફુલ ${c.fullQty} × ${fmt(c.rateFull)}` : ""}{c.fullQty && c.halfQty ? " + " : ""}{c.halfQty ? `હાફ ${c.halfQty} × ${fmt(c.rateHalf)}` : ""}
                         </div>
-                        <div className="s">{fest === "all" && `${festMap[c.festivalId]?.name || ""} · `}{fmtDate(c.date)} · {c.mode}{c.guestLabel && ` · મહેમાન: ${c.guestLabel}`}{c.phone && c.passFor === "outside" && ` · ${c.phone}`}{c.note && ` · ${c.note}`}</div>
+                        <div className="s">{fest === "all" && `${festMap[c.festivalId]?.name || ""} · `}{fmtDate(c.date)}{c.amount > 0 ? ` · ${c.mode}` : ""}{c.passNo && ` · પાસ નં. ${c.passNo}`}{c.guestLabel && ` · મહેમાન: ${c.guestLabel}`}{c.phone && c.passFor === "outside" && ` · ${c.phone}`}{c.note && ` · ${c.note}`}</div>
                       </div>
-                      <div className="amt" style={{ color: "var(--leaf)" }}>{fmt(c.amount)}</div>
-                      <a className="icon" aria-label="WhatsApp પહોંચ" title="WhatsApp પર પહોંચ મોકલો" href={receiptLink(c)} target="_blank" rel="noopener noreferrer"><MessageCircle size={15} /></a>
+                      <div className="amtcol">
+                        <div className="amt" style={{ color: c.amount ? "var(--leaf)" : "var(--muted)" }}>{passDue(c) ? `${fmt(c.amount)} / ${fmt(passTotalOf(c))}` : fmt(c.amount)}</div>
+                        {passDue(c) > 0 && <div className="due">બાકી {fmt(passDue(c))}</div>}
+                      </div>
+                      {passDue(c) > 0 && <button className="btn sec" style={{ padding: "6px 10px", fontSize: 14, color: "var(--leaf)" }} onClick={() => setModal({ type: "passpay", id: c.id })}><CheckCircle2 size={14} />પૈસા મળ્યા</button>}
+                      {passDue(c) > 0
+                        ? <a className="icon" aria-label="WhatsApp યાદ" title="બાકી રકમ માટે WhatsApp યાદ મોકલો" style={{ color: "var(--kumkum)" }} href={reminderLink(c)} target="_blank" rel="noopener noreferrer"><BellRing size={15} /></a>
+                        : <a className="icon" aria-label="WhatsApp પહોંચ" title="WhatsApp પર પહોંચ મોકલો" href={receiptLink(c)} target="_blank" rel="noopener noreferrer"><MessageCircle size={15} /></a>}
                       <button className="icon" aria-label="સુધારો" onClick={() => setModal({ type: "pass", item: c })}><Pencil size={15} /></button>
-                      <button className="icon del" aria-label="કાઢી નાખો" onClick={() => setModal({ type: "del", key: "collections", id: c.id, text: `${c.name} નો ${fmt(c.amount)} નો ભોજન પાસ કાઢી નાખવામાં આવશે.`, msg: "પાસ કાઢી નાખ્યો" })}><Trash2 size={15} /></button>
+                      <button className="icon del" aria-label="કાઢી નાખો" onClick={() => setModal({ type: "del", key: "collections", id: c.id, text: `${c.name} નો ${fmt(passTotalOf(c))} નો ભોજન પાસ કાઢી નાખવામાં આવશે.`, msg: "પાસ કાઢી નાખ્યો" })}><Trash2 size={15} /></button>
                     </div>
                   ))}
               </div>
@@ -1805,6 +1954,9 @@ export default function App() {
       {modal?.type === "exp" && <ExpenseForm initial={modal.item} festivals={sortedFests} defaultFest={fest !== "all" ? fest : undefined} onClose={() => setModal(null)} onSave={(x) => upsert("expenses", x, modal.item ? "ખર્ચ સુધાર્યો" : "ખર્ચ ઉમેર્યો")} />}
       {modal?.type === "col" && <CollectionForm initial={modal.item || (modal.preset && { type: MEMBER_FUND, festivalId: fest !== "all" ? fest : sortedFests[0]?.id, memberId: modal.preset.id, flat: modal.preset.house, name: modal.preset.name, amount: "", date: today(), mode: MODES[0], note: "" })} isEdit={!!modal.item} festivals={sortedFests} members={sortedMembers} collections={data.collections} defaultFest={fest !== "all" ? fest : undefined} onClose={() => setModal(null)} onSave={(x) => upsert("collections", x, modal.item ? "આવક સુધારી" : "આવક ઉમેરી")} />}
       {modal?.type === "pass" && <PassForm initial={modal.item} isEdit={!!modal.item} festivals={sortedFests} festMap={festMap} members={sortedMembers} defaultFest={fest !== "all" ? fest : undefined} onClose={() => setModal(null)} onSave={(x) => upsert("collections", x, modal.item ? "પાસ સુધાર્યો" : "પાસ સાચવ્યો")} />}
+      {modal?.type === "passpay" && data.collections.find((c) => c.id === modal.id) && (
+        <PassPayModal c={data.collections.find((c) => c.id === modal.id)} onClose={() => setModal(null)} onSave={(x) => upsert("collections", x, "પેમેન્ટ નોંધાયું")} />
+      )}
       {modal?.type === "fest" && <FestivalForm initial={modal.item} onClose={() => setModal(null)} onSave={(x) => upsert("festivals", x, modal.item ? "તહેવાર સુધાર્યો" : "તહેવાર ઉમેર્યો")} />}
       {modal?.type === "member" && <MemberForm initial={modal.item} onClose={() => setModal(null)} onSave={(x) => upsert("members", x, modal.item ? "સભ્ય સુધાર્યા" : "સભ્ય ઉમેર્યા")} />}
       {modal?.type === "share" && <ShareModal phone={phone} setPhone={setPhone} summary={summary} busy={busy} canShareFiles={canShareFiles} onDownload={downloadPdf} onShare={sharePdf} onClose={() => setModal(null)} />}
