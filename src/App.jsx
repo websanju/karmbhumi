@@ -1105,8 +1105,8 @@ function FestivalView({ f, data, members, covered, busy, onExcel, onPdf, onClose
           <tbody>
             {incGroups.map((g) => (
               <FragmentRows key={g.t}>
-                <tr className="grp"><td colSpan={5}>{g.t} ({g.items.length})</td><td className="r">{sub(g.items)}</td></tr>
-                {g.items.map((c) => <tr key={c.id}><td>{fmtDate(c.date)}</td><td>{c.flat || "-"}</td><td>{c.name}</td><td>{c.mode}</td><td>{noteOf(c)}</td><td className="r">{fmt(c.amount)}</td></tr>)}
+                <tr className="grp"><td colSpan={5}>{g.t} ({g.items.length}){g.t === PASS_TYPE && <span style={{ fontWeight: 400, fontSize: 13, color: "var(--muted)" }}> – વિગત નીચે "ભોજન પાસ" વિભાગમાં</span>}</td><td className="r">{sub(g.items)}</td></tr>
+                {g.t !== PASS_TYPE && g.items.map((c) => <tr key={c.id}><td>{fmtDate(c.date)}</td><td>{c.flat || "-"}</td><td>{c.name}</td><td>{c.mode}</td><td>{noteOf(c)}</td><td className="r">{fmt(c.amount)}</td></tr>)}
               </FragmentRows>
             ))}
             <tr className="tot"><td colSpan={5}>કુલ આવક</td><td className="r">{fmt(tIn)}</td></tr>
@@ -1443,7 +1443,9 @@ export default function App() {
 
   const match = (x, fields) => !q || fields.some((k) => String(x[k] || "").toLowerCase().includes(q.toLowerCase()));
   const expList = exps.filter((e) => (cat === "all" || e.category === cat) && match(e, ["title", "vendor", "paidBy", "note"])).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  const colList = cols.filter((c) => (incFilter === "all" || incType(c) === incFilter) && match(c, ["name", "flat", "note"])).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const passEntries = cols.filter((c) => incType(c) === PASS_TYPE);
+  const passTotal = passEntries.reduce((s, c) => s + c.amount, 0);
+  const colList = cols.filter((c) => incType(c) !== PASS_TYPE && (incFilter === "all" || incType(c) === incFilter) && match(c, ["name", "flat", "note"])).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
   const exportBackup = () => {
     const a = document.createElement("a");
@@ -1641,13 +1643,19 @@ export default function App() {
             <div className="toolbar">
               <div className="searchbox"><Search size={16} /><input className="inp" placeholder="નામ કે ઘર નંબર શોધો" value={q} onChange={(e) => setQ(e.target.value)} /></div>
               <select className="inp" style={{ width: "auto" }} value={incFilter} onChange={(e) => setIncFilter(e.target.value)}>
-                <option value="all">બધી આવક</option>{INCOME_TYPES.map((t) => <option key={t}>{t}</option>)}
+                <option value="all">બધી આવક</option>{INCOME_TYPES.filter((t) => t !== PASS_TYPE).map((t) => <option key={t}>{t}</option>)}
               </select>
               <button className="btn sec" disabled={busy} onClick={() => downloadExcel()}><FileSpreadsheet size={16} />Excel</button>
               <button className="btn" onClick={() => noFests ? needFest() : setModal({ type: "col" })}><Plus size={16} />આવક ઉમેરો</button>
             </div>
             <div className="panel" style={{ marginTop: 0 }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}><b>{colList.length} એન્ટ્રી</b><b style={{ color: "var(--leaf)" }}>{fmt(colList.reduce((s, c) => s + c.amount, 0))}</b></div>
+              {passEntries.length > 0 && incFilter === "all" && (
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", background: "var(--bg)", borderRadius: 8, padding: "8px 12px", margin: "4px 0 8px", fontSize: 14 }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}><UtensilsCrossed size={15} />ભોજન પાસની આવક <b>{fmt(passTotal)}</b> ({passEntries.length} એન્ટ્રી) કુલ આવકમાં ગણાય છે, પણ અહીં યાદીમાં નથી.</span>
+                  <button className="linkbtn" style={{ fontSize: 14 }} onClick={() => { setTab("passes"); setQ(""); }}>ભોજન પાસ ટૅબમાં જુઓ →</button>
+                </div>
+              )}
               {colList.length === 0 ? <div className="empty">{q || incFilter !== "all" ? "શોધ મુજબ કોઈ આવક મળી નહીં." : "હજુ કોઈ આવક નોંધાઈ નથી. ઉપર \"આવક ઉમેરો\" દબાવો."}</div> :
                 colList.map((c) => (
                   <div className="row" key={c.id}>

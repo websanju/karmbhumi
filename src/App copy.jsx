@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Plus, Pencil, Trash2, X, Search, Download, Upload, Wallet, HandCoins, Scale, CalendarDays, LayoutDashboard, Receipt, PartyPopper, Users, FileText, Share2, MessageCircle, Lock, Unlock, RefreshCw, Cloud, Eye, FileSpreadsheet } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Search, Download, Upload, Wallet, HandCoins, Scale, CalendarDays, LayoutDashboard, Receipt, PartyPopper, Users, FileText, Share2, MessageCircle, Lock, Unlock, RefreshCw, Cloud, Eye, FileSpreadsheet, UtensilsCrossed, Minus, Gift } from "lucide-react";
 
 const STORE_KEY = "karmbhumi-society-v1";      // shared: visible to everyone using the app
 const ADMIN_KEY = "karmbhumi-admin-pin";        // personal: this device's unlocked PIN hash
@@ -23,13 +23,59 @@ const getPersonal = async (key) => {
 const CATEGORIES = ["સજાવટ", "ભોજન / પ્રસાદ", "સાઉન્ડ / લાઇટ", "મંડપ", "પૂજા સામગ્રી", "ઇનામ / ભેટ", "કલાકાર / ગરબા", "પરિવહન", "સફાઈ", "અન્ય"];
 const MODES = ["રોકડ", "UPI", "બેંક ટ્રાન્સફર", "ચેક"];
 const MEMBER_FUND = "સભ્ય ફાળો";
-const INCOME_TYPES = [MEMBER_FUND, "દાન", "સ્પોન્સર", "સ્ટોલ / જગ્યા ભાડું", "લકી ડ્રો / ટિકિટ", "વ્યાજ", "અન્ય આવક"];
+const PASS_TYPE = "ભોજન પાસ";
+const SPONSOR = "સ્પોન્સર";
+const INCOME_TYPES = [MEMBER_FUND, PASS_TYPE, "દાન", SPONSOR, "સ્ટોલ / જગ્યા ભાડું", "લકી ડ્રો / ટિકિટ", "વ્યાજ", "અન્ય આવક"];
+const PASS_FOR = { society: "સોસાયટી સભ્ય", outside: "બહારના" };
 const incType = (c) => c.type || MEMBER_FUND; // old entries have no type = member fund
 const byDate = (a, b) => (a.date || "").localeCompare(b.date || "");
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const fmt = (n) => "₹" + Number(n || 0).toLocaleString("en-IN");
 const today = () => new Date().toISOString().slice(0, 10);
+// "ફુલ 2 × ₹300 + હાફ 1 × ₹150 (સોસાયટી સભ્ય)" for meal-pass entries, "" for everything else
+const passText = (c) => {
+  if ((c.type || "") !== PASS_TYPE) return "";
+  const parts = [
+    c.fullQty ? `ફુલ ${c.fullQty} × ${fmt(c.rateFull)}` : null,
+    c.halfQty ? `હાફ ${c.halfQty} × ${fmt(c.rateHalf)}` : null,
+  ].filter(Boolean).join(" + ");
+  return `${parts} (${PASS_FOR[c.passFor] || ""})${c.guestLabel ? ` · મહેમાન: ${c.guestLabel}` : ""}`;
+};
+// Sponsor / donation given as an item (murti, gift, prizes...) instead of cash.
+// Stored with amount 0 so cash totals and balance never include it.
+const IN_KIND_TYPES = [SPONSOR, "દાન"];
+const isInKind = (c) => !!c.inKind && IN_KIND_TYPES.includes(c.type || "");
+const kindText = (c) => (isInKind(c)
+  ? `વસ્તુ: ${c.item}${Number(c.itemQty) > 1 ? ` × ${c.itemQty}` : ""}${Number(c.estValue) ? ` (અંદાજે ${fmt(c.estValue)})` : ""}`
+  : "");
+const ITEM_SUGGEST = [
+  [/ગણેશ|ગણપતિ/, ["ગણેશજીની મૂર્તિ", "મોદક / લાડુ પ્રસાદ", "પૂજા સામગ્રી", "ડેકોરેશન"]],
+  [/નવરાત્ર|ગરબા/, ["માતાજીની મૂર્તિ / ફોટો", "ગરબા ઇનામ", "લ્હાણી", "પ્રસાદ", "ટ્રોફી"]],
+  [/દિવાળી|નવું વર્ષ/, ["ફટાકડા", "મીઠાઈ", "દીવા / રોશની", "રંગોળી સામગ્રી"]],
+  [/ઉત્તરાયણ|સંક્રાંત/, ["પતંગ", "દોરી", "ચીકી", "ઉંધિયું / જલેબી"]],
+  [/જન્માષ્ટમી|કૃષ્ણ/, ["કૃષ્ણ ભગવાનની મૂર્તિ", "મટકી", "પારણું", "પ્રસાદ"]],
+  [/હોળી|ધુળેટી/, ["રંગ / ગુલાલ", "હોલિકા લાકડાં", "ખજૂર / ધાણી"]],
+  [/સ્વાતંત્ર્ય|પ્રજાસત્તાક/, ["રાષ્ટ્રધ્વજ", "મીઠાઈ", "બાળકો માટે ભેટ"]],
+];
+const itemSuggestions = (festName = "") => {
+  const hit = ITEM_SUGGEST.find(([re]) => re.test(festName));
+  return [...(hit ? hit[1] : []), "ઇનામ / ભેટ", "ટ્રોફી", "પ્રસાદ", "નાસ્તો", "ડેકોરેશન", "સાઉન્ડ સિસ્ટમ"];
+};
+const noteOf = (c) => [passText(c), kindText(c), c.note].filter(Boolean).join(" · ");
+const passCounts = (list) => {
+  const r = { society: { full: 0, half: 0, amount: 0 }, outside: { full: 0, half: 0, amount: 0 } };
+  list.filter((c) => (c.type || "") === PASS_TYPE).forEach((c) => {
+    const k = c.passFor === "outside" ? "outside" : "society";
+    r[k].full += Number(c.fullQty) || 0;
+    r[k].half += Number(c.halfQty) || 0;
+    r[k].amount += c.amount;
+  });
+  r.full = r.society.full + r.outside.full;
+  r.half = r.society.half + r.outside.half;
+  r.amount = r.society.amount + r.outside.amount;
+  return r;
+};
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("gu-IN", { day: "numeric", month: "short", year: "numeric" }) : "-");
 
 const SEED_MEMBERS = [
@@ -172,6 +218,13 @@ const css = `
 .mini div{background:var(--bg);border-radius:8px;padding:10px 12px}
 .mini small{display:block;color:var(--muted)}
 .mini b{font-family:'Baloo Bhai 2';font-size:22px}
+.stepper{display:flex;align-items:center;gap:6px}
+.stepper button{width:38px;height:38px;border-radius:8px;border:1.5px solid var(--line);background:#fff;display:grid;place-items:center;color:var(--ink)}
+.stepper input{text-align:center;font-size:18px;font-weight:600}
+.total-box{background:var(--ink);color:#fff;border-radius:10px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;margin:4px 0 12px}
+.total-box b{font-family:'Baloo Bhai 2';font-size:28px}
+.hint{font-size:12px;color:var(--muted);margin-top:3px}
+.linkbtn{background:none;border:none;color:var(--peacock);text-decoration:underline;padding:0;font-size:12px}
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:8px;z-index:60}
 .fest-card{display:flex;gap:14px;align-items:center;padding:14px 0;border-top:1px solid var(--line)}
 .fest-card:first-child{border-top:none}
@@ -253,7 +306,7 @@ function ExpenseForm({ initial, festivals, defaultFest, onSave, onClose }) {
 }
 
 function CollectionForm({ initial, isEdit, festivals, members, collections, defaultFest, onSave, onClose }) {
-  const [f, setF] = useState({ type: MEMBER_FUND, ...(initial || { festivalId: defaultFest || festivals[0]?.id || "", memberId: "", flat: "", name: "", amount: "", date: today(), mode: MODES[0], note: "" }) });
+  const [f, setF] = useState({ type: MEMBER_FUND, inKind: false, item: "", itemQty: 1, estValue: "", ...(initial || { festivalId: defaultFest || festivals[0]?.id || "", memberId: "", flat: "", name: "", amount: "", date: today(), mode: MODES[0], note: "" }) });
   const [err, setErr] = useState({});
   const [mq, setMq] = useState("");
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -263,23 +316,33 @@ function CollectionForm({ initial, isEdit, festivals, members, collections, defa
     setF({ ...f, memberId: id, flat: m ? m.house : "", name: m ? m.name : "" });
   };
   const isFund = f.type === MEMBER_FUND;
+  const canKind = IN_KIND_TYPES.includes(f.type);
+  const kind = canKind && f.inKind;
+  const festName = festivals.find((x) => x.id === f.festivalId)?.name || "";
   const already = isFund && f.memberId && collections.some((c) => c.id !== f.id && c.festivalId === f.festivalId && c.memberId === f.memberId && incType(c) === MEMBER_FUND);
   const save = () => {
     const e = {};
     if (!f.festivalId) e.festivalId = "તહેવાર પસંદ કરો";
     if (!f.name.trim() && !f.flat.trim()) e.name = isFund ? "ઘર પસંદ કરો" : "ઘર પસંદ કરો અથવા નામ લખો";
     if (isFund && !f.memberId) e.name = "સભ્ય ફાળા માટે યાદીમાંથી ઘર પસંદ કરો";
-    if (!(Number(f.amount) > 0)) e.amount = "રકમ ૦ થી વધુ હોવી જોઈએ";
+    if (kind) {
+      if (!String(f.item).trim()) e.item = "કઈ વસ્તુ આપી તે લખો";
+    } else if (!(Number(f.amount) > 0)) e.amount = "રકમ ૦ થી વધુ હોવી જોઈએ";
     setErr(e);
     if (Object.keys(e).length) return;
-    onSave({ ...f, amount: Number(f.amount), id: f.id || uid() });
+    if (kind) {
+      onSave({ ...f, inKind: true, item: f.item.trim(), itemQty: Number(f.itemQty) || 1, estValue: Number(f.estValue) || 0, amount: 0, mode: "વસ્તુ રૂપે", id: f.id || uid() });
+    } else {
+      const { item, itemQty, estValue, ...rest } = f;
+      onSave({ ...rest, inKind: false, amount: Number(f.amount), mode: f.mode === "વસ્તુ રૂપે" ? MODES[0] : f.mode, id: f.id || uid() });
+    }
   };
   return (
     <Modal title={isEdit ? "આવક સુધારો" : "આવક ઉમેરો"} onClose={onClose}>
       <Field label="આવકનો પ્રકાર">
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {INCOME_TYPES.map((t) => (
-            <button type="button" key={t} className={`chip ${f.type === t ? "on" : ""}`} style={{ fontSize: 14 }} onClick={() => setF({ ...f, type: t })}>{t}</button>
+          {INCOME_TYPES.filter((t) => t !== PASS_TYPE).map((t) => (
+            <button type="button" key={t} className={`chip ${f.type === t ? "on" : ""}`} style={{ fontSize: 14 }} onClick={() => setF({ ...f, type: t, inKind: IN_KIND_TYPES.includes(t) ? f.inKind : false })}>{t}</button>
           ))}
         </div>
       </Field>
@@ -294,6 +357,7 @@ function CollectionForm({ initial, isEdit, festivals, members, collections, defa
           <option value="">{isFund ? "-- ઘર પસંદ કરો --" : "બહારની વ્યક્તિ / સંસ્થા (નીચે નામ લખો)"}</option>
           {shown.map((m) => <option key={m.id} value={m.id}>{m.house}  |  {m.name}</option>)}
         </select>
+        {f.type === SPONSOR && <div className="hint">સોસાયટીના સભ્ય સ્પોન્સર હોય તો ઘર પસંદ કરો, તેમનો સભ્ય ફાળો "બાકી" યાદીમાંથી નીકળી જશે.</div>}
         {already && <div className="err">આ ઘરનો આ તહેવારનો ફાળો પહેલેથી નોંધાયેલ છે. વધારાનો ફાળો હોય તો જ સાચવો.</div>}
       </Field>
       {!f.memberId && !isFund && (
@@ -302,13 +366,158 @@ function CollectionForm({ initial, isEdit, festivals, members, collections, defa
           <Field label="ઘર નં. / સરનામું (વૈકલ્પિક)"><input className="inp" value={f.flat} onChange={set("flat")} /></Field>
         </div>
       )}
-      <div className="grid2">
-        <Field label="રકમ (₹)" error={err.amount}><input className="inp" type="number" min="0" inputMode="decimal" value={f.amount} onChange={set("amount")} /></Field>
-        <Field label="તારીખ"><input className="inp" type="date" value={f.date} onChange={set("date")} /></Field>
-      </div>
-      <Field label="ચુકવણી રીત"><select className="inp" value={f.mode} onChange={set("mode")}>{MODES.map((c) => <option key={c}>{c}</option>)}</select></Field>
+      {canKind && (
+        <Field label={`${f.type} શેમાં આપ્યું?`}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <button type="button" className={`chip ${!kind ? "on" : ""}`} onClick={() => setF({ ...f, inKind: false })}>₹ રોકડ / ઓનલાઈન રકમ</button>
+            <button type="button" className={`chip ${kind ? "on" : ""}`} onClick={() => setF({ ...f, inKind: true })}><Gift size={14} style={{ verticalAlign: "-2px" }} /> વસ્તુ રૂપે (મૂર્તિ, ભેટ વગેરે)</button>
+          </div>
+          {kind && <div className="hint">વસ્તુ રૂપે મળેલું રોકડ આવક કે સિલકમાં ઉમેરાશે નહીં. હિસાબમાં અલગ યાદીમાં દેખાશે.</div>}
+        </Field>
+      )}
+      {kind ? (
+        <>
+          <Field label="કઈ વસ્તુ આપી" error={err.item}>
+            <input className="inp" list="kind-items" value={f.item} onChange={set("item")} placeholder="દા.ત. ગણેશજીની મૂર્તિ" />
+            <datalist id="kind-items">{itemSuggestions(festName).map((x) => <option key={x} value={x} />)}</datalist>
+          </Field>
+          <div className="grid2">
+            <Field label="સંખ્યા"><Stepper label="સંખ્યા" value={f.itemQty} onChange={(v) => setF({ ...f, itemQty: v })} /></Field>
+            <Field label="અંદાજિત કિંમત ₹ (વૈકલ્પિક)"><input className="inp" type="number" min="0" value={f.estValue} onChange={set("estValue")} /></Field>
+          </div>
+          <Field label="તારીખ"><input className="inp" type="date" value={f.date} onChange={set("date")} /></Field>
+        </>
+      ) : (
+        <>
+          <div className="grid2">
+            <Field label="રકમ (₹)" error={err.amount}><input className="inp" type="number" min="0" inputMode="decimal" value={f.amount} onChange={set("amount")} /></Field>
+            <Field label="તારીખ"><input className="inp" type="date" value={f.date} onChange={set("date")} /></Field>
+          </div>
+          <Field label="ચુકવણી રીત"><select className="inp" value={MODES.includes(f.mode) ? f.mode : MODES[0]} onChange={set("mode")}>{MODES.map((c) => <option key={c}>{c}</option>)}</select></Field>
+        </>
+      )}
       <Field label="નોંધ"><textarea className="inp" rows="2" value={f.note} onChange={set("note")} placeholder="દા.ત. ગરબાના ઇનામ માટે, સ્ટોલ નં. 3" /></Field>
       <div className="actions"><button className="btn sec" onClick={onClose}>રદ કરો</button><button className="btn" onClick={save}>આવક સાચવો</button></div>
+    </Modal>
+  );
+}
+
+function Stepper({ value, onChange, label }) {
+  const v = Number(value) || 0;
+  return (
+    <div className="stepper">
+      <button type="button" aria-label={`${label} ઓછા કરો`} onClick={() => onChange(Math.max(0, v - 1))}><Minus size={16} /></button>
+      <input className="inp" type="number" min="0" inputMode="numeric" value={value} onChange={(e) => onChange(e.target.value === "" ? "" : Math.max(0, parseInt(e.target.value, 10) || 0))} />
+      <button type="button" aria-label={`${label} વધારો`} onClick={() => onChange(v + 1)}><Plus size={16} /></button>
+    </div>
+  );
+}
+
+function PassForm({ initial, isEdit, festivals, festMap, members, defaultFest, onSave, onClose }) {
+  const defaultRates = (fid, pf) => {
+    const r = festMap[fid]?.passRates || {};
+    return pf === "outside" ? { rateFull: r.oFull || 0, rateHalf: r.oHalf || 0 } : { rateFull: r.sFull || 0, rateHalf: r.sHalf || 0 };
+  };
+  const startFest = defaultFest || festivals[0]?.id || "";
+  const [f, setF] = useState(initial || {
+    type: PASS_TYPE, festivalId: startFest, passFor: "society", memberId: "", flat: "", name: "", phone: "", guestOf: "", guestLabel: "",
+    fullQty: 1, halfQty: 0, ...defaultRates(startFest, "society"), date: today(), mode: MODES[0], note: "",
+  });
+  const [err, setErr] = useState({});
+  const [mq, setMq] = useState("");
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const shown = members.filter((m) => !mq || m.house.toLowerCase().includes(mq.toLowerCase()) || m.name.toLowerCase().includes(mq.toLowerCase()));
+  const std = defaultRates(f.festivalId, f.passFor);
+  const custom = Number(f.rateFull) !== std.rateFull || Number(f.rateHalf) !== std.rateHalf;
+  const total = (Number(f.fullQty) || 0) * (Number(f.rateFull) || 0) + (Number(f.halfQty) || 0) * (Number(f.rateHalf) || 0);
+
+  const changeFest = (fid) => setF({ ...f, festivalId: fid, ...defaultRates(fid, f.passFor) });
+  const changeFor = (pf) => setF({ ...f, passFor: pf, memberId: "", flat: "", name: "", guestOf: "", guestLabel: "", ...defaultRates(f.festivalId, pf) });
+  const pickMember = (id) => {
+    const m = members.find((x) => x.id === id);
+    setF({ ...f, memberId: id, flat: m ? m.house : "", name: m ? m.name : "", phone: m?.phone || f.phone });
+  };
+  const pickGuestOf = (id) => {
+    const m = members.find((x) => x.id === id);
+    setF({ ...f, guestOf: id, guestLabel: m ? `${m.house} ${m.name}` : "" });
+  };
+
+  const save = () => {
+    const e = {};
+    if (!f.festivalId) e.festivalId = "તહેવાર પસંદ કરો";
+    if (f.passFor === "society" && !f.memberId) e.name = "યાદીમાંથી ઘર પસંદ કરો";
+    if (f.passFor === "outside" && !String(f.name).trim()) e.name = "નામ લખો";
+    if (!((Number(f.fullQty) || 0) + (Number(f.halfQty) || 0))) e.qty = "ઓછામાં ઓછો એક પાસ પસંદ કરો";
+    if (Number(f.fullQty) > 0 && !(Number(f.rateFull) > 0)) e.rate = "ફુલ પાસનો દર લખો";
+    if (Number(f.halfQty) > 0 && !(Number(f.rateHalf) > 0)) e.rate = "હાફ પાસનો દર લખો";
+    setErr(e);
+    if (Object.keys(e).length) return;
+    onSave({
+      ...f, type: PASS_TYPE, id: f.id || uid(),
+      fullQty: Number(f.fullQty) || 0, halfQty: Number(f.halfQty) || 0,
+      rateFull: Number(f.rateFull) || 0, rateHalf: Number(f.rateHalf) || 0,
+      amount: total, flat: f.passFor === "society" ? f.flat : "",
+    });
+  };
+
+  return (
+    <Modal title={isEdit ? "ભોજન પાસ સુધારો" : "ભોજન પાસ આપો"} onClose={onClose}>
+      <Field label="તહેવાર" error={err.festivalId}>
+        <select className="inp" value={f.festivalId} onChange={(e) => changeFest(e.target.value)}>
+          {festivals.map((x) => <option key={x.id} value={x.id}>{x.name} {x.year}</option>)}
+        </select>
+      </Field>
+      <Field label="પાસ કોના માટે">
+        <div style={{ display: "flex", gap: 6 }}>
+          {Object.entries(PASS_FOR).map(([k, v]) => (
+            <button type="button" key={k} className={`chip ${f.passFor === k ? "on" : ""}`} onClick={() => changeFor(k)}>{v}</button>
+          ))}
+        </div>
+      </Field>
+
+      {f.passFor === "society" ? (
+        <Field label="ઘર નં. / સભ્ય" error={err.name}>
+          <input className="inp" style={{ marginBottom: 6 }} placeholder="ઘર નં. કે નામથી શોધો" value={mq} onChange={(e) => setMq(e.target.value)} />
+          <select className="inp" value={f.memberId || ""} onChange={(e) => pickMember(e.target.value)} size={Math.min(6, shown.length + 1)}>
+            <option value="">-- ઘર પસંદ કરો --</option>
+            {shown.map((m) => <option key={m.id} value={m.id}>{m.house}  |  {m.name}</option>)}
+          </select>
+        </Field>
+      ) : (
+        <>
+          <div className="grid2">
+            <Field label="નામ" error={err.name}><input className="inp" value={f.name} onChange={set("name")} /></Field>
+            <Field label="મોબાઇલ (વૈકલ્પિક)"><input className="inp" type="tel" value={f.phone || ""} onChange={set("phone")} /></Field>
+          </div>
+          <Field label="કોના મહેમાન (વૈકલ્પિક)">
+            <select className="inp" value={f.guestOf || ""} onChange={(e) => pickGuestOf(e.target.value)}>
+              <option value="">-- કોઈ નહીં --</option>
+              {members.map((m) => <option key={m.id} value={m.id}>{m.house}  |  {m.name}</option>)}
+            </select>
+          </Field>
+        </>
+      )}
+
+      <div className="grid2">
+        <Field label="ફુલ પાસ (સંખ્યા)"><Stepper label="ફુલ પાસ" value={f.fullQty} onChange={(v) => setF({ ...f, fullQty: v })} /></Field>
+        <Field label="ફુલ પાસનો દર (₹)"><input className="inp" type="number" min="0" value={f.rateFull} onChange={set("rateFull")} /></Field>
+        <Field label="હાફ પાસ (સંખ્યા)"><Stepper label="હાફ પાસ" value={f.halfQty} onChange={(v) => setF({ ...f, halfQty: v })} /></Field>
+        <Field label="હાફ પાસનો દર (₹)"><input className="inp" type="number" min="0" value={f.rateHalf} onChange={set("rateHalf")} /></Field>
+      </div>
+      <div className="hint" style={{ marginTop: -6, marginBottom: 8 }}>
+        {std.rateFull || std.rateHalf
+          ? <>નક્કી દર ({PASS_FOR[f.passFor]}): ફુલ {fmt(std.rateFull)} · હાફ {fmt(std.rateHalf)}{custom && <> · <button type="button" className="linkbtn" onClick={() => setF({ ...f, ...std })}>નક્કી દર લગાવો</button></>}</>
+          : "આ તહેવારના પાસના દર નક્કી નથી. તહેવારો ટૅબમાં દર સેટ કરો અથવા અહીં હાથથી લખો."}
+      </div>
+      {(err.qty || err.rate) && <div className="err" style={{ marginBottom: 8 }}>{err.qty || err.rate}</div>}
+      <div className="total-box"><span>કુલ રકમ</span><b>{fmt(total)}</b></div>
+
+      <div className="grid2">
+        <Field label="તારીખ"><input className="inp" type="date" value={f.date} onChange={set("date")} /></Field>
+        <Field label="ચુકવણી રીત"><select className="inp" value={f.mode} onChange={set("mode")}>{MODES.map((c) => <option key={c}>{c}</option>)}</select></Field>
+      </div>
+      <Field label="નોંધ"><input className="inp" value={f.note} onChange={set("note")} placeholder="દા.ત. પાસ નં. 101-103" /></Field>
+      <div className="actions"><button className="btn sec" onClick={onClose}>રદ કરો</button><button className="btn" onClick={save}>પાસ સાચવો</button></div>
     </Modal>
   );
 }
@@ -335,7 +544,7 @@ const th = { border: "1px solid #9fb3b0", padding: "5px 8px", background: "#0F5E
 const td = { border: "1px solid #c9d6d3", padding: "4px 8px" };
 const tdR = { ...td, textAlign: "right", whiteSpace: "nowrap" };
 
-function Report({ data, fest, festMap, sortedFests, paidFor }) {
+function Report({ data, fest, festMap, sortedFests, paidFor, sponsoredBy }) {
   const f = fest === "all" ? null : festMap[fest];
   const exps = data.expenses.filter((e) => !f || e.festivalId === f.id).sort((a, b) => (a.date || "").localeCompare(b.date || ""));
   const cols = data.collections.filter((c) => !f || c.festivalId === f.id);
@@ -343,7 +552,8 @@ function Report({ data, fest, festMap, sortedFests, paidFor }) {
   const collected = cols.reduce((s, c) => s + c.amount, 0);
   const members = [...data.members].sort((a, b) => a.order - b.order);
   const memberIds = new Set(members.map((m) => m.id));
-  const others = cols.filter((c) => incType(c) !== MEMBER_FUND || !c.memberId || !memberIds.has(c.memberId)).sort(byDate);
+  const others = cols.filter((c) => !isInKind(c) && (incType(c) !== MEMBER_FUND || !c.memberId || !memberIds.has(c.memberId))).sort(byDate);
+  const kinds = cols.filter(isInKind).sort(byDate);
   const fundTotal = cols.filter((c) => !others.includes(c)).reduce((s, c) => s + c.amount, 0);
   return (
     <div style={{ width: 794, padding: 36, background: "#fff", color: "#14303A", fontFamily: "'Hind Vadodara',sans-serif", fontSize: 13, lineHeight: 1.5 }}>
@@ -382,20 +592,48 @@ function Report({ data, fest, festMap, sortedFests, paidFor }) {
             <tbody>
               {members.map((m, i) => {
                 const p = paidFor(f.id, m.id);
+                const sp = !p && sponsoredBy(f.id, m.id);
                 return <tr key={m.id}><td style={td}>{i + 1}</td><td style={td}>{m.house}</td><td style={td}>{m.name}</td>
-                  <td style={{ ...tdR, color: p ? "#14303A" : "#B42A2A" }}>{p ? fmt(p) : "બાકી"}</td></tr>;
+                  <td style={{ ...tdR, color: p || sp ? "#14303A" : "#B42A2A" }}>{p ? fmt(p) : sp ? "સ્પોન્સર" : "બાકી"}</td></tr>;
               })}
               <tr><td style={{ ...td, fontWeight: 700 }} colSpan={3}>કુલ સભ્ય ફાળો</td><td style={{ ...tdR, fontWeight: 700 }}>{fmt(fundTotal)}</td></tr>
             </tbody>
           </table>
+          {(() => {
+            const pc = passCounts(cols);
+            if (!pc.full && !pc.half) return null;
+            return (
+              <>
+                <div style={{ fontFamily: "'Baloo Bhai 2'", fontSize: 19, fontWeight: 700, margin: "6px 0" }}>ભોજન પાસ સારાંશ</div>
+                <table style={{ borderCollapse: "collapse", width: "100%", marginBottom: 16 }}>
+                  <thead><tr><th style={th}>કોના માટે</th><th style={th}>ફુલ પાસ</th><th style={th}>હાફ પાસ</th><th style={th}>રકમ</th></tr></thead>
+                  <tbody>
+                    {["society", "outside"].map((k) => <tr key={k}><td style={td}>{PASS_FOR[k]}</td><td style={tdR}>{pc[k].full}</td><td style={tdR}>{pc[k].half}</td><td style={tdR}>{fmt(pc[k].amount)}</td></tr>)}
+                    <tr><td style={{ ...td, fontWeight: 700 }}>કુલ</td><td style={{ ...tdR, fontWeight: 700 }}>{pc.full}</td><td style={{ ...tdR, fontWeight: 700 }}>{pc.half}</td><td style={{ ...tdR, fontWeight: 700 }}>{fmt(pc.amount)}</td></tr>
+                  </tbody>
+                </table>
+              </>
+            );
+          })()}
           {others.length > 0 && (
             <>
               <div style={{ fontFamily: "'Baloo Bhai 2'", fontSize: 19, fontWeight: 700, margin: "6px 0" }}>અન્ય આવક</div>
               <table style={{ borderCollapse: "collapse", width: "100%", marginBottom: 16 }}>
                 <thead><tr><th style={{ ...th, width: 36 }}>ક્ર.</th><th style={{ ...th, width: 90 }}>તારીખ</th><th style={th}>પ્રકાર</th><th style={th}>નામ / વિગત</th><th style={{ ...th, width: 110 }}>રકમ</th></tr></thead>
                 <tbody>
-                  {others.map((c, i) => <tr key={c.id}><td style={td}>{i + 1}</td><td style={td}>{fmtDate(c.date)}</td><td style={td}>{incType(c)}</td><td style={td}>{c.name}{c.flat ? ` (${c.flat})` : ""}{c.note ? ` - ${c.note}` : ""}</td><td style={tdR}>{fmt(c.amount)}</td></tr>)}
+                  {others.map((c, i) => <tr key={c.id}><td style={td}>{i + 1}</td><td style={td}>{fmtDate(c.date)}</td><td style={td}>{incType(c)}</td><td style={td}>{c.name}{c.flat ? ` (${c.flat})` : ""}{noteOf(c) ? ` - ${noteOf(c)}` : ""}</td><td style={tdR}>{fmt(c.amount)}</td></tr>)}
                   <tr><td style={{ ...td, fontWeight: 700 }} colSpan={4}>કુલ અન્ય આવક</td><td style={{ ...tdR, fontWeight: 700 }}>{fmt(collected - fundTotal)}</td></tr>
+                </tbody>
+              </table>
+            </>
+          )}
+          {kinds.length > 0 && (
+            <>
+              <div style={{ fontFamily: "'Baloo Bhai 2'", fontSize: 19, fontWeight: 700, margin: "6px 0" }}>વસ્તુ રૂપે સ્પોન્સર / દાન <span style={{ fontSize: 12, fontWeight: 400 }}>(રોકડ હિસાબમાં ગણ્યું નથી)</span></div>
+              <table style={{ borderCollapse: "collapse", width: "100%", marginBottom: 16 }}>
+                <thead><tr><th style={{ ...th, width: 36 }}>ક્ર.</th><th style={th}>કોના તરફથી</th><th style={th}>વસ્તુ</th><th style={{ ...th, width: 60 }}>સંખ્યા</th><th style={{ ...th, width: 110 }}>અંદાજિત કિંમત</th></tr></thead>
+                <tbody>
+                  {kinds.map((c, i) => <tr key={c.id}><td style={td}>{i + 1}</td><td style={td}>{c.name}{c.flat ? ` (${c.flat})` : ""} · {incType(c)}</td><td style={td}>{c.item}{c.note ? ` - ${c.note}` : ""}</td><td style={tdR}>{c.itemQty || 1}</td><td style={tdR}>{c.estValue ? fmt(c.estValue) : "-"}</td></tr>)}
                 </tbody>
               </table>
             </>
@@ -445,11 +683,14 @@ function ShareModal({ phone, setPhone, summary, busy, onDownload, onShare, canSh
 function FestivalForm({ initial, onSave, onClose }) {
   const [f, setF] = useState(initial || { name: "", year: new Date().getFullYear(), date: today(), budget: "", note: "" });
   const [err, setErr] = useState({});
+  const [rates, setRates] = useState({ sFull: "", sHalf: "", oFull: "", oHalf: "", ...(initial?.passRates || {}) });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const setRate = (k) => (e) => setRates({ ...rates, [k]: e.target.value });
   const presets = ["નવરાત્રી", "દિવાળી", "ગણેશ ચતુર્થી", "ઉત્તરાયણ", "જન્માષ્ટમી", "હોળી", "સ્વાતંત્ર્ય દિન", "પ્રજાસત્તાક દિન", "રામ નવમી", "નવું વર્ષ"];
   const save = () => {
     if (!f.name.trim()) return setErr({ name: "તહેવારનું નામ લખો" });
-    onSave({ ...f, year: Number(f.year), budget: Number(f.budget) || 0, id: f.id || uid() });
+    const passRates = Object.fromEntries(Object.entries(rates).map(([k, v]) => [k, Number(v) || 0]));
+    onSave({ ...f, year: Number(f.year), budget: Number(f.budget) || 0, passRates, id: f.id || uid() });
   };
   return (
     <Modal title={initial ? "તહેવાર સુધારો" : "નવો તહેવાર ઉમેરો"} onClose={onClose}>
@@ -462,6 +703,16 @@ function FestivalForm({ initial, onSave, onClose }) {
         <Field label="તારીખ"><input className="inp" type="date" value={f.date} onChange={set("date")} /></Field>
       </div>
       <Field label="અંદાજિત બજેટ (₹)"><input className="inp" type="number" min="0" value={f.budget} onChange={set("budget")} /></Field>
+      <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px 2px", marginBottom: 12 }}>
+        <div style={{ fontWeight: 600, marginBottom: 6, display: "flex", gap: 6, alignItems: "center" }}><UtensilsCrossed size={16} />ભોજન પાસના દર (એક પાસનો ભાવ)</div>
+        <div className="grid2">
+          <Field label="સોસાયટી સભ્ય – ફુલ પાસ"><input className="inp" type="number" min="0" value={rates.sFull} onChange={setRate("sFull")} /></Field>
+          <Field label="સોસાયટી સભ્ય – હાફ પાસ"><input className="inp" type="number" min="0" value={rates.sHalf} onChange={setRate("sHalf")} /></Field>
+          <Field label="બહારના – ફુલ પાસ"><input className="inp" type="number" min="0" value={rates.oFull} onChange={setRate("oFull")} /></Field>
+          <Field label="બહારના – હાફ પાસ"><input className="inp" type="number" min="0" value={rates.oHalf} onChange={setRate("oHalf")} /></Field>
+        </div>
+        <div className="hint" style={{ marginBottom: 8 }}>પાસ વેચતી વખતે દર હાથથી બદલી પણ શકાશે.</div>
+      </div>
       <Field label="નોંધ"><textarea className="inp" rows="2" value={f.note} onChange={set("note")} /></Field>
       <div className="actions"><button className="btn sec" onClick={onClose}>રદ કરો</button><button className="btn" onClick={save}>તહેવાર સાચવો</button></div>
     </Modal>
@@ -492,7 +743,9 @@ async function buildExcel(data, festId) {
   const festMap = Object.fromEntries(fests.map((f) => [f.id, f]));
   const one = festId !== "all" ? festMap[festId] : null;
   const inFest = (x) => !one || x.festivalId === one.id;
-  const inc = data.collections.filter(inFest).sort(byDate);
+  const allInc = data.collections.filter(inFest).sort(byDate);
+  const inc = allInc.filter((c) => !isInKind(c)); // cash income only
+  const kinds = allInc.filter(isInKind);
   const exp = data.expenses.filter(inFest).sort(byDate);
   const fname = (id) => (festMap[id] ? `${festMap[id].name} ${festMap[id].year}` : "");
   const toDate = (d) => (d ? new Date(d + "T00:00:00") : null);
@@ -591,7 +844,7 @@ async function buildExcel(data, festId) {
     ws.getCell(2, 1).value = `રિપોર્ટ તારીખ: ${new Date().toLocaleDateString("en-IN")}  ·  આવક ${inc.length} એન્ટ્રી  ·  ખર્ચ ${exp.length} એન્ટ્રી`;
     ws.getCell(2, 1).font = { name: FONT, size: 10, color: { argb: "FF5D7178" } };
 
-    const section = ({ label, color, light, headers, groups, toRow, totalLabel }) => {
+    const section = ({ label, color, light, headers, groups, toRow, totalLabel, amountOf = (x) => x.amount }) => {
       ws.addRow([]);
       mergedRow(label, "", { bold: true, color: "FFFFFFFF", bg: color, size: 13 });
       const h = ws.addRow(keys.map((k) => headers[k] ?? ""));
@@ -613,7 +866,7 @@ async function buildExcel(data, festId) {
           row.getCell(amtCol).numFmt = RUPEE;
         });
         const last = ws.rowCount;
-        const v = g.items.reduce((a, x) => a + x.amount, 0);
+        const v = g.items.reduce((a, x) => a + (Number(amountOf(x)) || 0), 0);
         total += v;
         const sr = mergedRow(`${g.t} – કુલ`, { formula: `SUM(${amtLetter}${first}:${amtLetter}${last})`, result: v }, { bold: true });
         sr.getCell(amtCol).numFmt = RUPEE;
@@ -631,7 +884,7 @@ async function buildExcel(data, festId) {
       color: "FF2F7D4F", light: "FFE3F1E8",
       headers: { no: "ક્ર.", date: "તારીખ", fest: "તહેવાર", name: "નામ", sub: "ઘર નં. / સરનામું", by: "", mode: "ચુકવણી રીત", note: "નોંધ", amount: "રકમ" },
       groups: INCOME_TYPES.map((t) => ({ t, items: inc.filter((c) => incType(c) === t) })).filter((g) => g.items.length),
-      toRow: (c) => ({ date: toDate(c.date), fest: fname(c.festivalId), name: c.name || "-", sub: c.flat || "", by: "", mode: c.mode, note: c.note || "", amount: c.amount }),
+      toRow: (c) => ({ date: toDate(c.date), fest: fname(c.festivalId), name: c.name || "-", sub: c.flat || c.phone || "", by: "", mode: c.mode, note: noteOf(c), amount: c.amount }),
       totalLabel: "કુલ આવક",
     });
     const expRes = section({
@@ -656,6 +909,18 @@ async function buildExcel(data, festId) {
       r.getCell(amtCol).numFmt = RUPEE;
       if (label.startsWith("બાકી") && bal < 0) r.getCell(amtCol).font = { name: FONT, bold: true, size: 13, color: { argb: "FFB42A2A" } };
     });
+
+    if (kinds.length) {
+      section({
+        label: "વસ્તુ રૂપે સ્પોન્સર / દાન – રોકડ આવક કે સિલકમાં ગણ્યું નથી",
+        color: "FF8A5A00", light: "FFFDF1D6",
+        headers: { no: "ક્ર.", date: "તારીખ", fest: "તહેવાર", name: "વસ્તુ", sub: "કોના તરફથી", by: "સંખ્યા", mode: "", note: "નોંધ", amount: "અંદાજિત કિંમત" },
+        groups: IN_KIND_TYPES.map((t) => ({ t, items: kinds.filter((c) => incType(c) === t) })).filter((g) => g.items.length),
+        toRow: (c) => ({ date: toDate(c.date), fest: fname(c.festivalId), name: c.item, sub: `${c.name}${c.flat ? ` (${c.flat})` : ""}`, by: c.itemQty || 1, mode: "", note: c.note || "", amount: Number(c.estValue) || null }),
+        amountOf: (c) => c.estValue,
+        totalLabel: "અંદાજિત કુલ કિંમત (ફક્ત માહિતી માટે)",
+      });
+    }
     ws.pageSetup = { paperSize: 9, orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: "1:2" };
   }
 
@@ -686,7 +951,7 @@ async function buildExcel(data, festId) {
 
   // 2. Combined ledger (income + expense together, running balance)
   const ledger = [
-    ...inc.map((c) => ({ d: c.date, o: 0, row: { date: toDate(c.date), fest: fname(c.festivalId), kind: "આવક", label: incType(c), name: c.name, party: c.flat ? `ઘર ${c.flat}` : "", house: "", mode: c.mode, income: c.amount, expense: null, note: c.note || "" } })),
+    ...inc.map((c) => ({ d: c.date, o: 0, row: { date: toDate(c.date), fest: fname(c.festivalId), kind: "આવક", label: incType(c), name: c.name, party: c.flat ? `ઘર ${c.flat}` : "", house: "", mode: c.mode, income: c.amount, expense: null, note: noteOf(c) } })),
     ...exp.map((e) => ({ d: e.date, o: 1, row: { date: toDate(e.date), fest: fname(e.festivalId), kind: "ખર્ચ", label: e.category, name: e.title, party: e.vendor || "", house: e.paidBy || "", mode: e.mode, income: null, expense: e.amount, note: e.note || "" } })),
   ].sort((a, b) => (a.d || "").localeCompare(b.d || "") || a.o - b.o);
   let bal = 0;
@@ -722,7 +987,52 @@ async function buildExcel(data, festId) {
     { key: "mode", header: "ચુકવણી રીત", width: 13 },
     { key: "amount", header: "રકમ", width: 13, money: true },
     { key: "note", header: "નોંધ", width: 28 },
-  ], inc.map((c) => ({ date: toDate(c.date), fest: fname(c.festivalId), type: incType(c), house: c.flat || "", name: c.name, mode: c.mode, amount: c.amount, note: c.note || "" })), { totals: ["amount"] });
+  ], inc.map((c) => ({ date: toDate(c.date), fest: fname(c.festivalId), type: incType(c), house: c.flat || "", name: c.name, mode: c.mode, amount: c.amount, note: noteOf(c) })), { totals: ["amount"] });
+
+  // Items given instead of cash
+  if (kinds.length) {
+    sheet("વસ્તુ રૂપે", [
+      { key: "date", header: "તારીખ", width: 12, date: true },
+      ...(one ? [] : [{ key: "fest", header: "તહેવાર", width: 20 }]),
+      { key: "type", header: "પ્રકાર", width: 12 },
+      { key: "name", header: "કોના તરફથી", width: 32 },
+      { key: "house", header: "ઘર નં.", width: 10 },
+      { key: "item", header: "વસ્તુ", width: 30 },
+      { key: "qty", header: "સંખ્યા", width: 9 },
+      { key: "est", header: "અંદાજિત કિંમત", width: 15, money: true },
+      { key: "note", header: "નોંધ", width: 26 },
+    ], kinds.map((c) => ({ date: toDate(c.date), fest: fname(c.festivalId), type: incType(c), name: c.name, house: c.flat || "", item: c.item, qty: c.itemQty || 1, est: Number(c.estValue) || null, note: c.note || "" })),
+    { totals: ["qty", "est"], note: "વસ્તુ રૂપે મળેલ સ્પોન્સર / દાન – રોકડ આવક કે સિલકમાં ગણ્યું નથી" });
+  }
+
+  // Meal passes
+  const passes = inc.filter((c) => incType(c) === PASS_TYPE);
+  if (passes.length) {
+    const pc = passCounts(passes);
+    sheet("ભોજન પાસ", [
+      { key: "date", header: "તારીખ", width: 12, date: true },
+      ...(one ? [] : [{ key: "fest", header: "તહેવાર", width: 20 }]),
+      { key: "for", header: "કોના માટે", width: 15 },
+      { key: "name", header: "નામ", width: 32 },
+      { key: "house", header: "ઘર નં. / મોબાઇલ", width: 16 },
+      { key: "guest", header: "કોના મહેમાન", width: 26 },
+      { key: "fullQty", header: "ફુલ પાસ", width: 10 },
+      { key: "rateFull", header: "ફુલ દર", width: 11, money: true },
+      { key: "halfQty", header: "હાફ પાસ", width: 10 },
+      { key: "rateHalf", header: "હાફ દર", width: 11, money: true },
+      { key: "amount", header: "રકમ", width: 13, money: true },
+      { key: "mode", header: "ચુકવણી રીત", width: 13 },
+      { key: "note", header: "નોંધ", width: 22 },
+    ], passes.map((c) => ({
+      date: toDate(c.date), fest: fname(c.festivalId), for: PASS_FOR[c.passFor] || "", name: c.name,
+      house: c.flat || c.phone || "", guest: c.guestLabel || "",
+      fullQty: c.fullQty || 0, rateFull: c.fullQty ? c.rateFull : null, halfQty: c.halfQty || 0, rateHalf: c.halfQty ? c.rateHalf : null,
+      amount: c.amount, mode: c.mode, note: c.note || "",
+    })), {
+      totals: ["fullQty", "halfQty", "amount"],
+      note: `સોસાયટી: ફુલ ${pc.society.full}, હાફ ${pc.society.half}  ·  બહારના: ફુલ ${pc.outside.full}, હાફ ${pc.outside.half}  ·  કુલ ${pc.full} ફુલ + ${pc.half} હાફ = ${pc.full + pc.half} પાસ`,
+    });
+  }
 
   // 4. Expense detail
   sheet("ખર્ચ", [
@@ -742,8 +1052,9 @@ async function buildExcel(data, festId) {
     const members = [...data.members].sort((a, b) => a.order - b.order);
     const rows = members.map((m, i) => {
       const paid = sum(inc.filter((c) => c.memberId === m.id && incType(c) === MEMBER_FUND));
-      return paid
-        ? { no: i + 1, house: m.house, name: m.name, amount: paid, status: "મળ્યો" }
+      const sponsor = allInc.some((c) => c.memberId === m.id && incType(c) === SPONSOR);
+      return paid || sponsor
+        ? { no: i + 1, house: m.house, name: m.name, amount: paid || null, status: paid ? "મળ્યો" : "સ્પોન્સર" }
         : { no: i + 1, house: m.house, name: m.name, amount: null, status: "બાકી", __style: "pending" };
     });
     const ws5 = sheet("ઘર મુજબ ફાળો", [
@@ -752,7 +1063,7 @@ async function buildExcel(data, festId) {
       { key: "name", header: "સભ્યનું નામ", width: 42 },
       { key: "amount", header: "ફાળો", width: 13, money: true },
       { key: "status", header: "સ્થિતિ", width: 10 },
-    ], rows, { totals: ["amount"], note: `ફાળો આપનાર ઘર: ${rows.filter((r) => r.amount).length} / ${rows.length}` });
+    ], rows, { totals: ["amount"], note: `ફાળો આપનાર / સ્પોન્સર ઘર: ${rows.filter((r) => r.status !== "બાકી").length} / ${rows.length}` });
     ws5.eachRow((row, n) => { if (n > 3 && row.getCell("status").value === "બાકી") row.getCell("status").font = { name: FONT, bold: true, color: { argb: "FFB42A2A" } }; });
   }
 
@@ -761,14 +1072,17 @@ async function buildExcel(data, festId) {
 }
 
 // Detailed view of one festival: every income with name and every expense with label
-function FestivalView({ f, data, members, paidFor, busy, onExcel, onPdf, onClose }) {
-  const inc = data.collections.filter((c) => c.festivalId === f.id).sort(byDate);
+function FestivalView({ f, data, members, covered, busy, onExcel, onPdf, onClose }) {
+  const allInc = data.collections.filter((c) => c.festivalId === f.id).sort(byDate);
+  const inc = allInc.filter((c) => !isInKind(c));
+  const kinds = allInc.filter(isInKind);
   const exp = data.expenses.filter((e) => e.festivalId === f.id).sort(byDate);
   const tIn = inc.reduce((s, c) => s + c.amount, 0);
   const tEx = exp.reduce((s, e) => s + e.amount, 0);
   const incGroups = INCOME_TYPES.map((t) => ({ t, items: inc.filter((c) => incType(c) === t) })).filter((g) => g.items.length);
   const expGroups = CATEGORIES.map((t) => ({ t, items: exp.filter((e) => e.category === t) })).filter((g) => g.items.length);
-  const pending = members.filter((m) => !paidFor(f.id, m.id));
+  const pending = members.filter((m) => !covered(f.id, m.id));
+  const pc = passCounts(inc);
   const sub = (items) => fmt(items.reduce((s, x) => s + x.amount, 0));
   return (
     <Modal wide title={`${f.name} ${f.year}`} onClose={onClose}>
@@ -792,12 +1106,36 @@ function FestivalView({ f, data, members, paidFor, busy, onExcel, onPdf, onClose
             {incGroups.map((g) => (
               <FragmentRows key={g.t}>
                 <tr className="grp"><td colSpan={5}>{g.t} ({g.items.length})</td><td className="r">{sub(g.items)}</td></tr>
-                {g.items.map((c) => <tr key={c.id}><td>{fmtDate(c.date)}</td><td>{c.flat || "-"}</td><td>{c.name}</td><td>{c.mode}</td><td>{c.note}</td><td className="r">{fmt(c.amount)}</td></tr>)}
+                {g.items.map((c) => <tr key={c.id}><td>{fmtDate(c.date)}</td><td>{c.flat || "-"}</td><td>{c.name}</td><td>{c.mode}</td><td>{noteOf(c)}</td><td className="r">{fmt(c.amount)}</td></tr>)}
               </FragmentRows>
             ))}
             <tr className="tot"><td colSpan={5}>કુલ આવક</td><td className="r">{fmt(tIn)}</td></tr>
           </tbody>
         </table></div>
+      )}
+
+      {(pc.full > 0 || pc.half > 0) && (
+        <>
+          <div className="sec-h"><span>ભોજન પાસ</span><span>{pc.full} ફુલ + {pc.half} હાફ</span></div>
+          <div className="mini">
+            <div><small>સોસાયટી – ફુલ / હાફ</small><b>{pc.society.full} / {pc.society.half}</b></div>
+            <div><small>બહારના – ફુલ / હાફ</small><b>{pc.outside.full} / {pc.outside.half}</b></div>
+            <div><small>કુલ પાસ</small><b>{pc.full + pc.half}</b></div>
+            <div><small>પાસની આવક</small><b style={{ color: "var(--leaf)" }}>{fmt(pc.amount)}</b></div>
+          </div>
+        </>
+      )}
+
+      {kinds.length > 0 && (
+        <>
+          <div className="sec-h"><span>વસ્તુ રૂપે સ્પોન્સર / દાન ({kinds.length})</span><span style={{ fontSize: 13, fontWeight: 400, color: "var(--muted)" }}>રોકડ હિસાબમાં ગણ્યું નથી</span></div>
+          <div className="vt-wrap"><table className="vt">
+            <thead><tr><th>તારીખ</th><th>કોના તરફથી</th><th>પ્રકાર</th><th>વસ્તુ</th><th className="r">સંખ્યા</th><th className="r">અંદાજિત કિંમત</th></tr></thead>
+            <tbody>
+              {kinds.map((c) => <tr key={c.id}><td>{fmtDate(c.date)}</td><td>{c.name}{c.flat ? ` (${c.flat})` : ""}</td><td>{incType(c)}</td><td>{c.item}{c.note && <div style={{ fontSize: 12, color: "var(--muted)" }}>{c.note}</div>}</td><td className="r">{c.itemQty || 1}</td><td className="r">{c.estValue ? fmt(c.estValue) : "-"}</td></tr>)}
+            </tbody>
+          </table></div>
+        </>
       )}
 
       <div className="sec-h"><span>ખર્ચ ({exp.length})</span><span style={{ color: "var(--kumkum)" }}>{fmt(tEx)}</span></div>
@@ -981,7 +1319,9 @@ export default function App() {
   const collected = cols.reduce((s, x) => s + x.amount, 0);
   const budget = fest === "all" ? data.festivals.reduce((s, f) => s + (f.budget || 0), 0) : festMap[fest]?.budget || 0;
 
-  const pending = fest === "all" ? [] : sortedMembers.filter((m) => !paidFor(fest, m.id));
+  const sponsoredBy = (festId, memberId) => data.collections.some((c) => c.festivalId === festId && c.memberId === memberId && incType(c) === SPONSOR);
+  const covered = (festId, memberId) => paidFor(festId, memberId) > 0 || sponsoredBy(festId, memberId);
+  const pending = fest === "all" ? [] : sortedMembers.filter((m) => !covered(fest, m.id));
   const festTitle = fest === "all" ? "બધા તહેવાર" : `${festMap[fest]?.name} ${festMap[fest]?.year}`;
 
   const summary = [
@@ -1042,6 +1382,7 @@ export default function App() {
   };
 
   const [incFilter, setIncFilter] = useState("all");
+  const [passFilter, setPassFilter] = useState("all");
   const downloadExcel = async (festId = fest) => {
     setBusy(true);
     try {
@@ -1057,7 +1398,7 @@ export default function App() {
   };
   const receiptLink = (c) => {
     const m = data.members.find((x) => x.id === c.memberId);
-    const digits = String(m?.phone || "").replace(/\D/g, "");
+    const digits = String(m?.phone || c.phone || "").replace(/\D/g, "");
     const num = digits.length === 10 ? "91" + digits : digits;
     const text = [
       "*કર્મભૂમિ સોસાયટી, પાટણ*",
@@ -1066,8 +1407,9 @@ export default function App() {
       `નામ: ${c.name}${c.flat ? ` (ઘર ${c.flat})` : ""}`,
       `તહેવાર: ${festMap[c.festivalId] ? `${festMap[c.festivalId].name} ${festMap[c.festivalId].year}` : ""}`,
       `પ્રકાર: ${incType(c)}`,
-      `રકમ: ${fmt(c.amount)}`,
-      `તારીખ: ${fmtDate(c.date)} · ${c.mode}`,
+      passText(c) ? `પાસ: ${passText(c)}` : null,
+      isInKind(c) ? kindText(c) : `રકમ: ${fmt(c.amount)}`,
+      isInKind(c) ? `તારીખ: ${fmtDate(c.date)}` : `તારીખ: ${fmtDate(c.date)} · ${c.mode}`,
       c.note ? `નોંધ: ${c.note}` : null,
       "",
       "આપના સહયોગ બદલ આભાર 🙏",
@@ -1134,6 +1476,7 @@ export default function App() {
     { id: "dash", label: "ડેશબોર્ડ", icon: LayoutDashboard },
     { id: "exp", label: "ખર્ચ", icon: Receipt },
     { id: "col", label: "આવક", icon: HandCoins },
+    { id: "passes", label: "ભોજન પાસ", icon: UtensilsCrossed },
     { id: "members", label: "સભ્યો", icon: Users },
     { id: "fests", label: "તહેવારો", icon: PartyPopper },
   ];
@@ -1311,17 +1654,87 @@ export default function App() {
                     <div className="grow">
                       <div className="t">{c.flat && <span className="tag">{c.flat}</span>}{c.name}</div>
                       <div className="s"><span className="tag" style={incType(c) === MEMBER_FUND ? undefined : { background: "#FDF1D6", color: "#8A5A00" }}>{incType(c)}</span></div>
-                      <div className="s">{fest === "all" && `${festMap[c.festivalId]?.name || ""} · `}{fmtDate(c.date)} · {c.mode}{c.note && ` · ${c.note}`}</div>
+                      <div className="s">{fest === "all" && `${festMap[c.festivalId]?.name || ""} · `}{fmtDate(c.date)}{!isInKind(c) && ` · ${c.mode}`}{noteOf(c) && ` · ${noteOf(c)}`}</div>
                     </div>
-                    <div className="amt" style={{ color: "var(--leaf)" }}>{fmt(c.amount)}</div>
+                    {isInKind(c)
+                      ? <div className="amt" style={{ color: "#8A5A00", display: "flex", alignItems: "center", gap: 4 }} title="રોકડ હિસાબમાં ગણ્યું નથી"><Gift size={16} />વસ્તુ</div>
+                      : <div className="amt" style={{ color: "var(--leaf)" }}>{fmt(c.amount)}</div>}
                     <a className="icon" aria-label="WhatsApp પહોંચ" title="WhatsApp પર પહોંચ મોકલો" href={receiptLink(c)} target="_blank" rel="noopener noreferrer"><MessageCircle size={15} /></a>
-                    <button className="icon" aria-label="સુધારો" onClick={() => setModal({ type: "col", item: c })}><Pencil size={15} /></button>
-                    <button className="icon del" aria-label="કાઢી નાખો" onClick={() => setModal({ type: "del", key: "collections", id: c.id, text: `${c.name || c.flat} ની ${fmt(c.amount)} આવક (${incType(c)}) કાઢી નાખવામાં આવશે.`, msg: "આવક કાઢી નાખી" })}><Trash2 size={15} /></button>
+                    <button className="icon" aria-label="સુધારો" onClick={() => setModal({ type: incType(c) === PASS_TYPE ? "pass" : "col", item: c })}><Pencil size={15} /></button>
+                    <button className="icon del" aria-label="કાઢી નાખો" onClick={() => setModal({ type: "del", key: "collections", id: c.id, text: `${c.name || c.flat} ની ${isInKind(c) ? kindText(c) : fmt(c.amount)} આવક (${incType(c)}) કાઢી નાખવામાં આવશે.`, msg: "આવક કાઢી નાખી" })}><Trash2 size={15} /></button>
                   </div>
                 ))}
             </div>
           </>
         )}
+
+        {loaded && tab === "passes" && (() => {
+          const all = cols.filter((c) => incType(c) === PASS_TYPE);
+          const list = all
+            .filter((c) => (passFilter === "all" || c.passFor === passFilter) && match(c, ["name", "flat", "phone", "note", "guestLabel"]))
+            .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+          const pc = passCounts(all);
+          const cf = fest !== "all" ? festMap[fest] : null;
+          const r = cf?.passRates || {};
+          return (
+            <>
+              {cf ? (
+                <div className="panel" style={{ marginTop: 0, marginBottom: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                    <h3 style={{ margin: 0 }}>{cf.name} {cf.year} – પાસના દર</h3>
+                    <button className="btn sec adm" style={{ padding: "6px 12px" }} onClick={() => setModal({ type: "fest", item: cf })}><Pencil size={14} />દર બદલો</button>
+                  </div>
+                  <div className="mini" style={{ margin: "10px 0 0" }}>
+                    <div><small>સોસાયટી – ફુલ</small><b>{fmt(r.sFull)}</b></div>
+                    <div><small>સોસાયટી – હાફ</small><b>{fmt(r.sHalf)}</b></div>
+                    <div><small>બહારના – ફુલ</small><b>{fmt(r.oFull)}</b></div>
+                    <div><small>બહારના – હાફ</small><b>{fmt(r.oHalf)}</b></div>
+                  </div>
+                </div>
+              ) : (
+                <div className="panel" style={{ marginTop: 0, marginBottom: 14, color: "var(--muted)" }}>પાસના દર જોવા કે બદલવા માટે ઉપરથી તહેવાર પસંદ કરો. નીચે બધા તહેવારના પાસ દેખાય છે.</div>
+              )}
+
+              <div className="stats" style={{ marginBottom: 14 }}>
+                <div className="stat" style={{ "--c": "var(--peacock)" }}><div className="lbl">સોસાયટી સભ્ય</div><div className="num">{pc.society.full} ફુલ · {pc.society.half} હાફ</div><div style={{ fontSize: 13, color: "var(--muted)" }}>{fmt(pc.society.amount)}</div></div>
+                <div className="stat" style={{ "--c": "var(--marigold)" }}><div className="lbl">બહારના</div><div className="num">{pc.outside.full} ફુલ · {pc.outside.half} હાફ</div><div style={{ fontSize: 13, color: "var(--muted)" }}>{fmt(pc.outside.amount)}</div></div>
+                <div className="stat" style={{ "--c": "var(--leaf)" }}><div className="lbl">કુલ પાસ (રસોઈ માટે)</div><div className="num">{pc.full + pc.half}</div><div style={{ fontSize: 13, color: "var(--muted)" }}>{pc.full} ફુલ + {pc.half} હાફ · {fmt(pc.amount)}</div></div>
+              </div>
+
+              <div className="toolbar">
+                <div className="searchbox"><Search size={16} /><input className="inp" placeholder="નામ, ઘર નં. કે મોબાઇલ શોધો" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+                <select className="inp" style={{ width: "auto" }} value={passFilter} onChange={(e) => setPassFilter(e.target.value)}>
+                  <option value="all">બધા</option>{Object.entries(PASS_FOR).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+                <button className="btn sec" disabled={busy} onClick={() => downloadExcel()}><FileSpreadsheet size={16} />Excel</button>
+                <button className="btn" onClick={() => noFests ? needFest() : setModal({ type: "pass" })}><Plus size={16} />પાસ આપો</button>
+              </div>
+              <div className="panel" style={{ marginTop: 0 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <b>{list.length} એન્ટ્રી · {list.reduce((a, c) => a + (c.fullQty || 0), 0)} ફુલ + {list.reduce((a, c) => a + (c.halfQty || 0), 0)} હાફ</b>
+                  <b style={{ color: "var(--leaf)" }}>{fmt(list.reduce((a, c) => a + c.amount, 0))}</b>
+                </div>
+                {list.length === 0 ? <div className="empty">{q || passFilter !== "all" ? "શોધ મુજબ કોઈ પાસ મળ્યો નહીં." : "હજુ કોઈ ભોજન પાસ આપ્યો નથી. ઉપર \"પાસ આપો\" દબાવો."}</div> :
+                  list.map((c) => (
+                    <div className="row" key={c.id}>
+                      <div className="grow">
+                        <div className="t">{c.flat && <span className="tag">{c.flat}</span>}{c.name}</div>
+                        <div className="s">
+                          <span className="tag" style={c.passFor === "outside" ? { background: "#FDF1D6", color: "#8A5A00" } : undefined}>{PASS_FOR[c.passFor]}</span>
+                          {c.fullQty ? `ફુલ ${c.fullQty} × ${fmt(c.rateFull)}` : ""}{c.fullQty && c.halfQty ? " + " : ""}{c.halfQty ? `હાફ ${c.halfQty} × ${fmt(c.rateHalf)}` : ""}
+                        </div>
+                        <div className="s">{fest === "all" && `${festMap[c.festivalId]?.name || ""} · `}{fmtDate(c.date)} · {c.mode}{c.guestLabel && ` · મહેમાન: ${c.guestLabel}`}{c.phone && c.passFor === "outside" && ` · ${c.phone}`}{c.note && ` · ${c.note}`}</div>
+                      </div>
+                      <div className="amt" style={{ color: "var(--leaf)" }}>{fmt(c.amount)}</div>
+                      <a className="icon" aria-label="WhatsApp પહોંચ" title="WhatsApp પર પહોંચ મોકલો" href={receiptLink(c)} target="_blank" rel="noopener noreferrer"><MessageCircle size={15} /></a>
+                      <button className="icon" aria-label="સુધારો" onClick={() => setModal({ type: "pass", item: c })}><Pencil size={15} /></button>
+                      <button className="icon del" aria-label="કાઢી નાખો" onClick={() => setModal({ type: "del", key: "collections", id: c.id, text: `${c.name} નો ${fmt(c.amount)} નો ભોજન પાસ કાઢી નાખવામાં આવશે.`, msg: "પાસ કાઢી નાખ્યો" })}><Trash2 size={15} /></button>
+                    </div>
+                  ))}
+              </div>
+            </>
+          );
+        })()}
 
         {loaded && tab === "members" && (
           <>
@@ -1340,7 +1753,7 @@ export default function App() {
                   <div className="row" key={m.id}>
                     <div style={{ minWidth: 52, fontFamily: "'Baloo Bhai 2'", fontWeight: 700, fontSize: 18 }}>{m.house}</div>
                     <div className="grow"><div className="t">{m.name}</div>{m.phone && <div className="s">{m.phone}</div>}</div>
-                    {fest !== "all" && (p ? <div className="amt" style={{ color: "var(--leaf)" }}>{fmt(p)}</div> :
+                    {fest !== "all" && (p ? <div className="amt" style={{ color: "var(--leaf)" }}>{fmt(p)}</div> : sponsoredBy(fest, m.id) ? <span className="tag" style={{ background: "#FDF1D6", color: "#8A5A00", fontSize: 13 }}>સ્પોન્સર</span> :
                       <button className="btn sec" style={{ padding: "6px 10px", fontSize: 14, color: "var(--kumkum)" }} onClick={() => setModal({ type: "col", preset: m })}><Plus size={14} />ફાળો</button>)}
                     <button className="icon" aria-label="સુધારો" onClick={() => setModal({ type: "member", item: m })}><Pencil size={15} /></button>
                     <button className="icon del" aria-label="કાઢી નાખો" onClick={() => setModal({ type: "del", key: "members", id: m.id, text: `${m.house} - ${m.name} ને સભ્ય યાદીમાંથી કાઢી નાખવામાં આવશે. તેમની જૂની ફાળાની એન્ટ્રી રહેશે.`, msg: "સભ્ય કાઢી નાખ્યા" })}><Trash2 size={15} /></button>
@@ -1383,16 +1796,17 @@ export default function App() {
 
       {modal?.type === "exp" && <ExpenseForm initial={modal.item} festivals={sortedFests} defaultFest={fest !== "all" ? fest : undefined} onClose={() => setModal(null)} onSave={(x) => upsert("expenses", x, modal.item ? "ખર્ચ સુધાર્યો" : "ખર્ચ ઉમેર્યો")} />}
       {modal?.type === "col" && <CollectionForm initial={modal.item || (modal.preset && { type: MEMBER_FUND, festivalId: fest !== "all" ? fest : sortedFests[0]?.id, memberId: modal.preset.id, flat: modal.preset.house, name: modal.preset.name, amount: "", date: today(), mode: MODES[0], note: "" })} isEdit={!!modal.item} festivals={sortedFests} members={sortedMembers} collections={data.collections} defaultFest={fest !== "all" ? fest : undefined} onClose={() => setModal(null)} onSave={(x) => upsert("collections", x, modal.item ? "આવક સુધારી" : "આવક ઉમેરી")} />}
+      {modal?.type === "pass" && <PassForm initial={modal.item} isEdit={!!modal.item} festivals={sortedFests} festMap={festMap} members={sortedMembers} defaultFest={fest !== "all" ? fest : undefined} onClose={() => setModal(null)} onSave={(x) => upsert("collections", x, modal.item ? "પાસ સુધાર્યો" : "પાસ સાચવ્યો")} />}
       {modal?.type === "fest" && <FestivalForm initial={modal.item} onClose={() => setModal(null)} onSave={(x) => upsert("festivals", x, modal.item ? "તહેવાર સુધાર્યો" : "તહેવાર ઉમેર્યો")} />}
       {modal?.type === "member" && <MemberForm initial={modal.item} onClose={() => setModal(null)} onSave={(x) => upsert("members", x, modal.item ? "સભ્ય સુધાર્યા" : "સભ્ય ઉમેર્યા")} />}
       {modal?.type === "share" && <ShareModal phone={phone} setPhone={setPhone} summary={summary} busy={busy} canShareFiles={canShareFiles} onDownload={downloadPdf} onShare={sharePdf} onClose={() => setModal(null)} />}
       {modal?.type === "share" && (
         <div style={{ position: "fixed", left: -10000, top: 0 }} aria-hidden="true">
-          <div ref={reportRef}><Report data={data} fest={fest} festMap={festMap} sortedFests={sortedFests} paidFor={paidFor} /></div>
+          <div ref={reportRef}><Report data={data} fest={fest} festMap={festMap} sortedFests={sortedFests} paidFor={paidFor} sponsoredBy={sponsoredBy} /></div>
         </div>
       )}
       {modal?.type === "view" && festMap[modal.id] && (
-        <FestivalView f={festMap[modal.id]} data={data} members={sortedMembers} paidFor={paidFor} busy={busy}
+        <FestivalView f={festMap[modal.id]} data={data} members={sortedMembers} covered={covered} busy={busy}
           onExcel={() => downloadExcel(modal.id)}
           onPdf={() => { setFest(modal.id); setModal({ type: "share" }); }}
           onClose={() => setModal(null)} />
