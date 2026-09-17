@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Plus, Pencil, Trash2, X, Search, Download, Upload, Wallet, HandCoins, Scale, CalendarDays, LayoutDashboard, Receipt, PartyPopper, Users, FileText, Share2, MessageCircle, Lock, Unlock, RefreshCw, Cloud, Eye, FileSpreadsheet, UtensilsCrossed, Minus, Gift, BellRing, CheckCircle2 } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Search, Download, Upload, Wallet, HandCoins, Scale, CalendarDays, LayoutDashboard, Receipt, PartyPopper, Users, FileText, Share2, MessageCircle, Lock, Unlock, RefreshCw, Cloud, Eye, FileSpreadsheet, UtensilsCrossed, Minus, Gift, BellRing, CheckCircle2, Smartphone, Share, SquarePlus } from "lucide-react";
 
 const STORE_KEY = "karmbhumi-society-v1";      // shared: visible to everyone using the app
 const ADMIN_KEY = "karmbhumi-admin-pin";        // personal: this device's unlocked PIN hash
@@ -88,6 +88,20 @@ const passCounts = (list) => {
   ["full", "half", "amount", "total", "due", "dueCount"].forEach((x) => { r[x] = r.society[x] + r.outside[x]; });
   return r;
 };
+// ---- validation helpers ----
+const cleanPhone = (p) => String(p || "").replace(/[\s\-()]/g, "");
+const phoneOk = (p) => !cleanPhone(p) || /^(\+?91)?[6-9]\d{9}$/.test(cleanPhone(p));
+const dateOk = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || "") && !Number.isNaN(new Date(d).getTime());
+const notNeg = (v) => v === "" || v === null || v === undefined || Number(v) >= 0;
+const MAX_AMOUNT = 1e8; // ₹10 crore – anything above is surely a typing mistake
+const amountErr = (v, label = "રકમ") => {
+  const n = Number(v);
+  if (v === "" || v === null || v === undefined || Number.isNaN(n)) return `${label} લખો`;
+  if (n <= 0) return `${label} ૦ થી વધુ હોવી જોઈએ`;
+  if (n > MAX_AMOUNT) return `${label} બહુ મોટી છે, ચકાસો`;
+  return null;
+};
+const norm = (x) => String(x || "").trim().toLowerCase().replace(/\s+/g, " ");
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("gu-IN", { day: "numeric", month: "short", year: "numeric" }) : "-");
 
 const SEED_MEMBERS = [
@@ -293,10 +307,12 @@ function ExpenseForm({ initial, festivals, defaultFest, onSave, onClose }) {
     const e = {};
     if (!f.festivalId) e.festivalId = "તહેવાર પસંદ કરો";
     if (!f.title.trim()) e.title = "ખર્ચની વિગત લખો";
-    if (!(Number(f.amount) > 0)) e.amount = "રકમ ૦ થી વધુ હોવી જોઈએ";
+    const ae = amountErr(f.amount); if (ae) e.amount = ae;
+    if (!dateOk(f.date)) e.date = "તારીખ પસંદ કરો";
+    if (!CATEGORIES.includes(f.category)) e.category = "પ્રકાર પસંદ કરો";
     setErr(e);
     if (Object.keys(e).length) return;
-    onSave({ ...f, amount: Number(f.amount), id: f.id || uid() });
+    onSave({ ...f, title: f.title.trim(), vendor: (f.vendor || "").trim(), paidBy: (f.paidBy || "").trim(), note: (f.note || "").trim(), amount: Number(f.amount), id: f.id || uid() });
   };
   return (
     <Modal title={initial ? "ખર્ચ સુધારો" : "નવો ખર્ચ ઉમેરો"} onClose={onClose}>
@@ -305,10 +321,10 @@ function ExpenseForm({ initial, festivals, defaultFest, onSave, onClose }) {
           {festivals.map((x) => <option key={x.id} value={x.id}>{x.name} {x.year}</option>)}
         </select>
       </Field>
-      <Field label="ખર્ચની વિગત" error={err.title}><input className="inp" value={f.title} onChange={set("title")} placeholder="દા.ત. ગરબા માટે સાઉન્ડ સિસ્ટમ" autoFocus /></Field>
+      <Field label="ખર્ચની વિગત" error={err.title}><input className="inp" maxLength={150} value={f.title} onChange={set("title")} placeholder="દા.ત. ગરબા માટે સાઉન્ડ સિસ્ટમ" autoFocus /></Field>
       <div className="grid2">
         <Field label="રકમ (₹)" error={err.amount}><input className="inp" type="number" min="0" inputMode="decimal" value={f.amount} onChange={set("amount")} /></Field>
-        <Field label="તારીખ"><input className="inp" type="date" value={f.date} onChange={set("date")} /></Field>
+        <Field label="તારીખ" error={err.date}><input className="inp" type="date" value={f.date} onChange={set("date")} /></Field>
         <Field label="પ્રકાર"><select className="inp" value={f.category} onChange={set("category")}>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select></Field>
         <Field label="ચુકવણી રીત"><select className="inp" value={f.mode} onChange={set("mode")}>{MODES.map((c) => <option key={c}>{c}</option>)}</select></Field>
         <Field label="કોણે ચૂકવ્યા (સભ્ય)"><input className="inp" value={f.paidBy} onChange={set("paidBy")} placeholder="દા.ત. રાજુભાઈ" /></Field>
@@ -325,7 +341,10 @@ function CollectionForm({ initial, isEdit, festivals, members, collections, defa
   const [err, setErr] = useState({});
   const [mq, setMq] = useState("");
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
-  const shown = members.filter((m) => !mq || m.house.toLowerCase().includes(mq.toLowerCase()) || m.name.toLowerCase().includes(mq.toLowerCase()));
+  // houses that already gave member fund for this festival are not offered again
+  const fundDone = new Set(collections.filter((c) => c.id !== f.id && c.festivalId === f.festivalId && incType(c) === MEMBER_FUND && c.memberId).map((c) => c.memberId));
+  const shown = members.filter((m) => (f.type !== MEMBER_FUND || !fundDone.has(m.id) || m.id === f.memberId)
+    && (!mq || m.house.toLowerCase().includes(mq.toLowerCase()) || m.name.toLowerCase().includes(mq.toLowerCase())));
   const pickMember = (id) => {
     const m = members.find((x) => x.id === id);
     setF({ ...f, memberId: id, flat: m ? m.house : "", name: m ? m.name : "" });
@@ -334,22 +353,28 @@ function CollectionForm({ initial, isEdit, festivals, members, collections, defa
   const canKind = IN_KIND_TYPES.includes(f.type);
   const kind = canKind && f.inKind;
   const festName = festivals.find((x) => x.id === f.festivalId)?.name || "";
-  const already = isFund && f.memberId && collections.some((c) => c.id !== f.id && c.festivalId === f.festivalId && c.memberId === f.memberId && incType(c) === MEMBER_FUND);
+  const already = isFund && f.memberId && fundDone.has(f.memberId);
   const save = () => {
     const e = {};
     if (!f.festivalId) e.festivalId = "તહેવાર પસંદ કરો";
-    if (!f.name.trim() && !f.flat.trim()) e.name = isFund ? "ઘર પસંદ કરો" : "ઘર પસંદ કરો અથવા નામ લખો";
     if (isFund && !f.memberId) e.name = "સભ્ય ફાળા માટે યાદીમાંથી ઘર પસંદ કરો";
+    else if (already) e.name = "આ ઘરનો આ તહેવારનો સભ્ય ફાળો પહેલેથી નોંધાયેલ છે. જૂની એન્ટ્રી ✏️ સુધારો.";
+    else if (!f.memberId && !String(f.name).trim()) e.name = "યાદીમાંથી ઘર પસંદ કરો અથવા નીચે નામ લખો";
+    if (!dateOk(f.date)) e.date = "તારીખ પસંદ કરો";
     if (kind) {
       if (!String(f.item).trim()) e.item = "કઈ વસ્તુ આપી તે લખો";
-    } else if (!(Number(f.amount) > 0)) e.amount = "રકમ ૦ થી વધુ હોવી જોઈએ";
+      if (!(Number(f.itemQty) >= 1)) e.item = "સંખ્યા ઓછામાં ઓછી 1 રાખો";
+      if (!notNeg(f.estValue) || Number(f.estValue) > MAX_AMOUNT) e.estValue = "અંદાજિત કિંમત સાચી લખો";
+    } else {
+      const ae = amountErr(f.amount); if (ae) e.amount = ae;
+    }
     setErr(e);
     if (Object.keys(e).length) return;
     if (kind) {
-      onSave({ ...f, inKind: true, item: f.item.trim(), itemQty: Number(f.itemQty) || 1, estValue: Number(f.estValue) || 0, amount: 0, mode: "વસ્તુ રૂપે", id: f.id || uid() });
+      onSave({ ...f, name: String(f.name).trim(), flat: String(f.flat || "").trim(), inKind: true, item: f.item.trim(), itemQty: Number(f.itemQty) || 1, estValue: Number(f.estValue) || 0, amount: 0, mode: "વસ્તુ રૂપે", id: f.id || uid() });
     } else {
       const { item, itemQty, estValue, ...rest } = f;
-      onSave({ ...rest, inKind: false, amount: Number(f.amount), mode: f.mode === "વસ્તુ રૂપે" ? MODES[0] : f.mode, id: f.id || uid() });
+      onSave({ ...rest, name: String(f.name).trim(), flat: String(f.flat || "").trim(), note: String(f.note || "").trim(), inKind: false, amount: Number(f.amount), mode: f.mode === "વસ્તુ રૂપે" ? MODES[0] : f.mode, id: f.id || uid() });
     }
   };
   return (
@@ -357,12 +382,12 @@ function CollectionForm({ initial, isEdit, festivals, members, collections, defa
       <Field label="આવકનો પ્રકાર">
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           {INCOME_TYPES.filter((t) => t !== PASS_TYPE).map((t) => (
-            <button type="button" key={t} className={`chip ${f.type === t ? "on" : ""}`} style={{ fontSize: 14 }} onClick={() => setF({ ...f, type: t, inKind: IN_KIND_TYPES.includes(t) ? f.inKind : false })}>{t}</button>
+            <button type="button" key={t} className={`chip ${f.type === t ? "on" : ""}`} style={{ fontSize: 14 }} onClick={() => setF({ ...f, type: t, inKind: IN_KIND_TYPES.includes(t) ? f.inKind : false, ...(t === MEMBER_FUND && fundDone.has(f.memberId) ? { memberId: "", flat: "", name: "" } : {}) })}>{t}</button>
           ))}
         </div>
       </Field>
       <Field label="તહેવાર" error={err.festivalId}>
-        <select className="inp" value={f.festivalId} onChange={set("festivalId")}>
+        <select className="inp" value={f.festivalId} onChange={(e) => setF({ ...f, festivalId: e.target.value })}>
           {festivals.map((x) => <option key={x.id} value={x.id}>{x.name} {x.year}</option>)}
         </select>
       </Field>
@@ -373,11 +398,12 @@ function CollectionForm({ initial, isEdit, festivals, members, collections, defa
           {shown.map((m) => <option key={m.id} value={m.id}>{m.house}  |  {m.name}</option>)}
         </select>
         {f.type === SPONSOR && <div className="hint">સોસાયટીના સભ્ય સ્પોન્સર હોય તો ઘર પસંદ કરો, તેમનો સભ્ય ફાળો "બાકી" યાદીમાંથી નીકળી જશે.</div>}
-        {already && <div className="err">આ ઘરનો આ તહેવારનો ફાળો પહેલેથી નોંધાયેલ છે. વધારાનો ફાળો હોય તો જ સાચવો.</div>}
+        {isFund && fundDone.size > 0 && <div className="hint">{fundDone.size} ઘરનો આ તહેવારનો ફાળો આવી ગયો છે, એટલે તે યાદીમાં દેખાતા નથી.</div>}
+        {already && !err.name && <div className="err">આ ઘરનો આ તહેવારનો સભ્ય ફાળો પહેલેથી નોંધાયેલ છે.</div>}
       </Field>
       {!f.memberId && !isFund && (
         <div className="grid2">
-          <Field label="નામ / સંસ્થા / દુકાન"><input className="inp" value={f.name} onChange={set("name")} /></Field>
+          <Field label="નામ / સંસ્થા / દુકાન"><input className="inp" maxLength={100} value={f.name} onChange={set("name")} /></Field>
           <Field label="ઘર નં. / સરનામું (વૈકલ્પિક)"><input className="inp" value={f.flat} onChange={set("flat")} /></Field>
         </div>
       )}
@@ -398,15 +424,15 @@ function CollectionForm({ initial, isEdit, festivals, members, collections, defa
           </Field>
           <div className="grid2">
             <Field label="સંખ્યા"><Stepper label="સંખ્યા" value={f.itemQty} onChange={(v) => setF({ ...f, itemQty: v })} /></Field>
-            <Field label="અંદાજિત કિંમત ₹ (વૈકલ્પિક)"><input className="inp" type="number" min="0" value={f.estValue} onChange={set("estValue")} /></Field>
+            <Field label="અંદાજિત કિંમત ₹ (વૈકલ્પિક)" error={err.estValue}><input className="inp" type="number" min="0" value={f.estValue} onChange={set("estValue")} /></Field>
           </div>
-          <Field label="તારીખ"><input className="inp" type="date" value={f.date} onChange={set("date")} /></Field>
+          <Field label="તારીખ" error={err.date}><input className="inp" type="date" value={f.date} onChange={set("date")} /></Field>
         </>
       ) : (
         <>
           <div className="grid2">
             <Field label="રકમ (₹)" error={err.amount}><input className="inp" type="number" min="0" inputMode="decimal" value={f.amount} onChange={set("amount")} /></Field>
-            <Field label="તારીખ"><input className="inp" type="date" value={f.date} onChange={set("date")} /></Field>
+            <Field label="તારીખ" error={err.date}><input className="inp" type="date" value={f.date} onChange={set("date")} /></Field>
           </div>
           <Field label="ચુકવણી રીત"><select className="inp" value={MODES.includes(f.mode) ? f.mode : MODES[0]} onChange={set("mode")}>{MODES.map((c) => <option key={c}>{c}</option>)}</select></Field>
         </>
@@ -428,7 +454,7 @@ function Stepper({ value, onChange, label }) {
   );
 }
 
-function PassForm({ initial, isEdit, festivals, festMap, members, defaultFest, onSave, onClose }) {
+function PassForm({ initial, isEdit, festivals, festMap, members, collections, defaultFest, onSave, onClose }) {
   const defaultRates = (fid, pf) => {
     const r = festMap[fid]?.passRates || {};
     return pf === "outside" ? { rateFull: r.oFull || 0, rateHalf: r.oHalf || 0 } : { rateFull: r.sFull || 0, rateHalf: r.sHalf || 0 };
@@ -445,14 +471,25 @@ function PassForm({ initial, isEdit, festivals, festMap, members, defaultFest, o
   const [pay, setPay] = useState(!initial || initPaid >= initTotal ? "full" : initPaid === 0 ? "pending" : "part");
   const [paidAmt, setPaidAmt] = useState(initial && initPaid > 0 && initPaid < initTotal ? String(initPaid) : "");
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
-  const shown = members.filter((m) => !mq || m.house.toLowerCase().includes(mq.toLowerCase()) || m.name.toLowerCase().includes(mq.toLowerCase()));
+  // a society house gets one pass entry per festival – more passes = edit that entry
+  const passOf = (fid) => new Map(collections
+    .filter((c) => c.id !== f.id && c.festivalId === fid && incType(c) === PASS_TYPE && c.passFor !== "outside" && c.memberId)
+    .map((c) => [c.memberId, c]));
+  const taken = passOf(f.festivalId);
+  const shown = members.filter((m) => !taken.has(m.id)
+    && (!mq || m.house.toLowerCase().includes(mq.toLowerCase()) || m.name.toLowerCase().includes(mq.toLowerCase())));
+  const outsideDup = f.passFor === "outside" && collections.find((c) => c.id !== f.id && c.festivalId === f.festivalId && incType(c) === PASS_TYPE && c.passFor === "outside"
+    && ((cleanPhone(f.phone) && cleanPhone(c.phone) === cleanPhone(f.phone)) || (norm(f.name) && norm(c.name) === norm(f.name))));
   const std = defaultRates(f.festivalId, f.passFor);
   const custom = Number(f.rateFull) !== std.rateFull || Number(f.rateHalf) !== std.rateHalf;
   const total = (Number(f.fullQty) || 0) * (Number(f.rateFull) || 0) + (Number(f.halfQty) || 0) * (Number(f.rateHalf) || 0);
   const paid = pay === "full" ? total : pay === "pending" ? 0 : Math.min(total, Number(paidAmt) || 0);
   const due = Math.max(0, total - paid);
 
-  const changeFest = (fid) => setF({ ...f, festivalId: fid, ...defaultRates(fid, f.passFor) });
+  const changeFest = (fid) => {
+    const clash = f.passFor === "society" && f.memberId && passOf(fid).has(f.memberId);
+    setF({ ...f, festivalId: fid, ...defaultRates(fid, f.passFor), ...(clash ? { memberId: "", flat: "", name: "" } : {}) });
+  };
   const changeFor = (pf) => setF({ ...f, passFor: pf, memberId: "", flat: "", name: "", guestOf: "", guestLabel: "", ...defaultRates(f.festivalId, pf) });
   const pickMember = (id) => {
     const m = members.find((x) => x.id === id);
@@ -467,7 +504,12 @@ function PassForm({ initial, isEdit, festivals, festMap, members, defaultFest, o
     const e = {};
     if (!f.festivalId) e.festivalId = "તહેવાર પસંદ કરો";
     if (f.passFor === "society" && !f.memberId) e.name = "યાદીમાંથી ઘર પસંદ કરો";
+    else if (f.passFor === "society" && taken.has(f.memberId)) e.name = "આ ઘરને આ તહેવારનો પાસ પહેલેથી અપાયો છે. વધુ પાસ માટે જૂની એન્ટ્રી ✏️ સુધારો.";
     if (f.passFor === "outside" && !String(f.name).trim()) e.name = "નામ લખો";
+    if (f.passFor === "outside" && !phoneOk(f.phone)) e.phone = "10 અંકનો સાચો મોબાઇલ નંબર લખો";
+    if (!dateOk(f.date)) e.date = "તારીખ પસંદ કરો";
+    if (Number(f.fullQty) > 500 || Number(f.halfQty) > 500) e.qty = "પાસની સંખ્યા ચકાસો (500 થી વધુ)";
+    if (!notNeg(f.rateFull) || !notNeg(f.rateHalf)) e.rate = "દર ૦ કે તેથી વધુ હોવો જોઈએ";
     if (!((Number(f.fullQty) || 0) + (Number(f.halfQty) || 0))) e.qty = "ઓછામાં ઓછો એક પાસ પસંદ કરો";
     if (Number(f.fullQty) > 0 && !(Number(f.rateFull) > 0)) e.rate = "ફુલ પાસનો દર લખો";
     if (Number(f.halfQty) > 0 && !(Number(f.rateHalf) > 0)) e.rate = "હાફ પાસનો દર લખો";
@@ -481,6 +523,8 @@ function PassForm({ initial, isEdit, festivals, festMap, members, defaultFest, o
       amount: paid, passTotal: total, passNo: String(f.passNo || "").trim(),
       mode: paid > 0 ? (MODES.includes(f.mode) ? f.mode : MODES[0]) : "બાકી",
       flat: f.passFor === "society" ? f.flat : "",
+      name: String(f.name).trim(), phone: cleanPhone(f.phone), note: String(f.note || "").trim(),
+      memberId: f.passFor === "society" ? f.memberId : "",
     });
   };
 
@@ -506,13 +550,22 @@ function PassForm({ initial, isEdit, festivals, festMap, members, defaultFest, o
             <option value="">-- ઘર પસંદ કરો --</option>
             {shown.map((m) => <option key={m.id} value={m.id}>{m.house}  |  {m.name}</option>)}
           </select>
+          {taken.size > 0 && (
+            <div className="hint">{taken.size} ઘરને આ તહેવારનો પાસ અપાઈ ગયો છે, એટલે તે યાદીમાં નથી. વધુ પાસ માટે ભોજન પાસ ટૅબમાંથી તેમની એન્ટ્રી ✏️ સુધારો.</div>
+          )}
+          {shown.length === 0 && !mq && <div className="err">બધા ઘરને આ તહેવારનો પાસ અપાઈ ગયો છે.</div>}
         </Field>
       ) : (
         <>
           <div className="grid2">
-            <Field label="નામ" error={err.name}><input className="inp" value={f.name} onChange={set("name")} /></Field>
-            <Field label="મોબાઇલ (વૈકલ્પિક)"><input className="inp" type="tel" value={f.phone || ""} onChange={set("phone")} /></Field>
+            <Field label="નામ" error={err.name}><input className="inp" maxLength={100} value={f.name} onChange={set("name")} /></Field>
+            <Field label="મોબાઇલ (વૈકલ્પિક)" error={err.phone}><input className="inp" type="tel" inputMode="tel" maxLength={14} value={f.phone || ""} onChange={set("phone")} /></Field>
           </div>
+          {outsideDup && (
+            <div className="err" style={{ marginTop: -6, marginBottom: 10 }}>
+              ધ્યાન આપો: "{outsideDup.name}"{outsideDup.phone ? ` (${outsideDup.phone})` : ""} ને આ તહેવારનો પાસ પહેલેથી અપાયો છે. એ જ વ્યક્તિ હોય તો જૂની એન્ટ્રી સુધારો.
+            </div>
+          )}
           <Field label="કોના મહેમાન (વૈકલ્પિક)">
             <select className="inp" value={f.guestOf || ""} onChange={(e) => pickGuestOf(e.target.value)}>
               <option value="">-- કોઈ નહીં --</option>
@@ -547,12 +600,43 @@ function PassForm({ initial, isEdit, festivals, festMap, members, defaultFest, o
       {due > 0 && <div className="duebox"><span>બાકી પેમેન્ટ</span><span>{fmt(due)}</span></div>}
 
       <div className="grid2">
-        <Field label="તારીખ"><input className="inp" type="date" value={f.date} onChange={set("date")} /></Field>
+        <Field label="તારીખ" error={err.date}><input className="inp" type="date" value={f.date} onChange={set("date")} /></Field>
         <Field label="પાસ નંબર (વૈકલ્પિક)"><input className="inp" value={f.passNo || ""} onChange={set("passNo")} placeholder="દા.ત. 101-103" /></Field>
       </div>
       {paid > 0 && <Field label="ચુકવણી રીત"><select className="inp" value={MODES.includes(f.mode) ? f.mode : MODES[0]} onChange={set("mode")}>{MODES.map((c) => <option key={c}>{c}</option>)}</select></Field>}
       <Field label="નોંધ"><input className="inp" value={f.note} onChange={set("note")} placeholder="દા.ત. રવિવારે પૈસા આપશે" /></Field>
       <div className="actions"><button className="btn sec" onClick={onClose}>રદ કરો</button><button className="btn" onClick={save}>પાસ સાચવો</button></div>
+    </Modal>
+  );
+}
+
+function InstallHelp({ isIOS, onClose }) {
+  const step = (n, text) => (
+    <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginBottom: 12 }}>
+      <div style={{ background: "var(--marigold)", borderRadius: 999, width: 28, height: 28, flexShrink: 0, display: "grid", placeItems: "center", fontWeight: 700 }}>{n}</div>
+      <div style={{ paddingTop: 2 }}>{text}</div>
+    </div>
+  );
+  return (
+    <Modal title="ફોનમાં એપ તરીકે ઉમેરો" onClose={onClose}>
+      {isIOS ? (
+        <>
+          <p style={{ marginTop: 0, color: "var(--muted)" }}>iPhone / iPad માટે (Safari માં ખોલેલું હોવું જોઈએ)</p>
+          {step(1, <>નીચે (અથવા ઉપર) આવેલું <b>શેર બટન</b> <Share size={16} style={{ verticalAlign: "-3px" }} /> દબાવો.</>)}
+          {step(2, <>યાદી થોડી નીચે સરકાવો અને <b>"Add to Home Screen"</b> <SquarePlus size={16} style={{ verticalAlign: "-3px" }} /> (હોમ સ્ક્રીન પર ઉમેરો) દબાવો.</>)}
+          {step(3, <>ઉપર જમણી બાજુ <b>"Add"</b> દબાવો. હોમ સ્ક્રીન પર દીવાવાળું <b>કર્મભૂમિ</b> આઇકન આવી જશે.</>)}
+          <p className="hint">Chrome કે WhatsApp ની અંદર લિંક ખોલી હોય તો પહેલા "Safari માં ખોલો" કરો.</p>
+        </>
+      ) : (
+        <>
+          <p style={{ marginTop: 0, color: "var(--muted)" }}>Android માટે (Chrome માં ખોલેલું હોવું જોઈએ)</p>
+          {step(1, <>ઉપર જમણી બાજુ <b>⋮ (ત્રણ ટપકાં)</b> દબાવો.</>)}
+          {step(2, <><b>"Install app"</b> અથવા <b>"Add to Home screen"</b> દબાવો.</>)}
+          {step(3, <><b>"Install"</b> દબાવો. હોમ સ્ક્રીન પર <b>કર્મભૂમિ</b> એપ આવી જશે.</>)}
+          <p className="hint">WhatsApp ની અંદર લિંક ખોલી હોય તો ⋮ માંથી "Open in Chrome" કરો.</p>
+        </>
+      )}
+      <div className="actions"><button className="btn" onClick={onClose}>સમજાઈ ગયું</button></div>
     </Modal>
   );
 }
@@ -567,6 +651,7 @@ function PassPayModal({ c, onSave, onClose }) {
     const a = Number(amt);
     if (!(a > 0)) return setErr("રકમ લખો");
     if (a > due) return setErr(`બાકી રકમ ${fmt(due)} કરતાં વધુ ન હોઈ શકે`);
+    if (!dateOk(date)) return setErr("તારીખ પસંદ કરો");
     onSave({ ...c, amount: (Number(c.amount) || 0) + a, mode, payments: [...(c.payments || []), { amount: a, date, mode }] });
   };
   return (
@@ -592,19 +677,26 @@ function PassPayModal({ c, onSave, onClose }) {
   );
 }
 
-function MemberForm({ initial, onSave, onClose }) {
+function MemberForm({ initial, members = [], onSave, onClose }) {
   const [f, setF] = useState(initial || { house: "", name: "", phone: "" });
-  const [err, setErr] = useState("");
+  const [err, setErr] = useState({});
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const save = () => {
-    if (!f.house.trim() || !f.name.trim()) return setErr("ઘર નં. અને નામ બંને લખો");
-    onSave({ ...f, id: f.id || uid(), order: f.order || Date.now() });
+    const e = {};
+    const house = f.house.trim().toUpperCase().replace(/\s+/g, "");
+    if (!house) e.house = "ઘર નં. લખો";
+    else if (members.some((m) => m.id !== f.id && norm(m.house).replace(/\s+/g, "") === house.toLowerCase())) e.house = `ઘર નં. ${house} પહેલેથી યાદીમાં છે`;
+    if (!f.name.trim()) e.name = "સભ્યનું નામ લખો";
+    if (!phoneOk(f.phone)) e.phone = "10 અંકનો સાચો મોબાઇલ નંબર લખો";
+    setErr(e);
+    if (Object.keys(e).length) return;
+    onSave({ ...f, house, name: f.name.trim(), phone: cleanPhone(f.phone), id: f.id || uid(), order: f.order || Date.now() });
   };
   return (
     <Modal title={initial ? "સભ્ય સુધારો" : "નવો સભ્ય ઉમેરો"} onClose={onClose}>
-      <Field label="ઘર નં."><input className="inp" value={f.house} onChange={set("house")} autoFocus /></Field>
-      <Field label="સભ્યનું નામ" error={err}><input className="inp" value={f.name} onChange={set("name")} /></Field>
-      <Field label="મોબાઇલ નંબર (વૈકલ્પિક)"><input className="inp" type="tel" value={f.phone || ""} onChange={set("phone")} /></Field>
+      <Field label="ઘર નં." error={err.house}><input className="inp" maxLength={12} value={f.house} onChange={set("house")} autoFocus placeholder="દા.ત. A-14 અથવા 44" /></Field>
+      <Field label="સભ્યનું નામ" error={err.name}><input className="inp" maxLength={100} value={f.name} onChange={set("name")} /></Field>
+      <Field label="મોબાઇલ નંબર (વૈકલ્પિક)" error={err.phone}><input className="inp" type="tel" inputMode="tel" maxLength={14} value={f.phone || ""} onChange={set("phone")} placeholder="દા.ત. 98xxxxxxxx" /></Field>
       <div className="actions"><button className="btn sec" onClick={onClose}>રદ કરો</button><button className="btn" onClick={save}>સભ્ય સાચવો</button></div>
     </Modal>
   );
@@ -750,7 +842,7 @@ function ShareModal({ phone, setPhone, summary, busy, onDownload, onShare, canSh
   );
 }
 
-function FestivalForm({ initial, onSave, onClose }) {
+function FestivalForm({ initial, festivals = [], onSave, onClose }) {
   const [f, setF] = useState(initial || { name: "", year: new Date().getFullYear(), date: today(), budget: "", note: "" });
   const [err, setErr] = useState({});
   const [rates, setRates] = useState({ sFull: "", sHalf: "", oFull: "", oHalf: "", ...(initial?.passRates || {}) });
@@ -758,21 +850,33 @@ function FestivalForm({ initial, onSave, onClose }) {
   const setRate = (k) => (e) => setRates({ ...rates, [k]: e.target.value });
   const presets = ["નવરાત્રી", "દિવાળી", "ગણેશ ચતુર્થી", "ઉત્તરાયણ", "જન્માષ્ટમી", "હોળી", "સ્વાતંત્ર્ય દિન", "પ્રજાસત્તાક દિન", "રામ નવમી", "નવું વર્ષ"];
   const save = () => {
-    if (!f.name.trim()) return setErr({ name: "તહેવારનું નામ લખો" });
+    const e = {};
+    const year = Number(f.year);
+    if (!f.name.trim()) e.name = "તહેવારનું નામ લખો";
+    else if (festivals.some((x) => x.id !== f.id && norm(x.name) === norm(f.name) && Number(x.year) === year)) e.name = `${f.name.trim()} ${year} પહેલેથી છે`;
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) e.year = "વર્ષ 2000 થી 2100 વચ્ચે લખો";
+    if (f.date && !dateOk(f.date)) e.date = "તારીખ સાચી પસંદ કરો";
+    else if (f.date && Number.isInteger(year) && Math.abs(new Date(f.date).getFullYear() - year) > 1) e.date = `તારીખ ${year} વર્ષની નથી`;
+    if (!notNeg(f.budget) || Number(f.budget) > MAX_AMOUNT) e.budget = "બજેટ સાચું લખો";
+    if (Object.values(rates).some((v) => !notNeg(v) || Number(v) > 100000)) e.rates = "પાસનો દર ૦ થી ₹1,00,000 વચ્ચે લખો";
+    else if ((Number(rates.sHalf) > 0 && Number(rates.sFull) > 0 && Number(rates.sHalf) > Number(rates.sFull))
+      || (Number(rates.oHalf) > 0 && Number(rates.oFull) > 0 && Number(rates.oHalf) > Number(rates.oFull))) e.rates = "હાફ પાસનો દર ફુલ પાસ કરતાં વધુ ન હોઈ શકે";
+    setErr(e);
+    if (Object.keys(e).length) return;
     const passRates = Object.fromEntries(Object.entries(rates).map(([k, v]) => [k, Number(v) || 0]));
-    onSave({ ...f, year: Number(f.year), budget: Number(f.budget) || 0, passRates, id: f.id || uid() });
+    onSave({ ...f, name: f.name.trim(), note: (f.note || "").trim(), year, budget: Number(f.budget) || 0, passRates, id: f.id || uid() });
   };
   return (
     <Modal title={initial ? "તહેવાર સુધારો" : "નવો તહેવાર ઉમેરો"} onClose={onClose}>
       <Field label="તહેવારનું નામ" error={err.name}>
-        <input className="inp" list="fest-presets" value={f.name} onChange={set("name")} autoFocus />
+        <input className="inp" list="fest-presets" maxLength={60} value={f.name} onChange={set("name")} autoFocus />
         <datalist id="fest-presets">{presets.map((p) => <option key={p} value={p} />)}</datalist>
       </Field>
       <div className="grid2">
-        <Field label="વર્ષ"><input className="inp" type="number" value={f.year} onChange={set("year")} /></Field>
-        <Field label="તારીખ"><input className="inp" type="date" value={f.date} onChange={set("date")} /></Field>
+        <Field label="વર્ષ" error={err.year}><input className="inp" type="number" min="2000" max="2100" value={f.year} onChange={set("year")} /></Field>
+        <Field label="તારીખ" error={err.date}><input className="inp" type="date" value={f.date} onChange={set("date")} /></Field>
       </div>
-      <Field label="અંદાજિત બજેટ (₹)"><input className="inp" type="number" min="0" value={f.budget} onChange={set("budget")} /></Field>
+      <Field label="અંદાજિત બજેટ (₹)" error={err.budget}><input className="inp" type="number" min="0" value={f.budget} onChange={set("budget")} /></Field>
       <div style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 12px 2px", marginBottom: 12 }}>
         <div style={{ fontWeight: 600, marginBottom: 6, display: "flex", gap: 6, alignItems: "center" }}><UtensilsCrossed size={16} />ભોજન પાસના દર (એક પાસનો ભાવ)</div>
         <div className="grid2">
@@ -781,6 +885,7 @@ function FestivalForm({ initial, onSave, onClose }) {
           <Field label="બહારના – ફુલ પાસ"><input className="inp" type="number" min="0" value={rates.oFull} onChange={setRate("oFull")} /></Field>
           <Field label="બહારના – હાફ પાસ"><input className="inp" type="number" min="0" value={rates.oHalf} onChange={setRate("oHalf")} /></Field>
         </div>
+        {err.rates && <div className="err" style={{ marginBottom: 6 }}>{err.rates}</div>}
         <div className="hint" style={{ marginBottom: 8 }}>પાસ વેચતી વખતે દર હાથથી બદલી પણ શકાશે.</div>
       </div>
       <Field label="નોંધ"><textarea className="inp" rows="2" value={f.note} onChange={set("note")} /></Field>
@@ -1458,8 +1563,7 @@ export default function App() {
     setBusy(true);
     try {
       const blob = await makePdf();
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob); a.download = pdfName(); a.click();
+      saveBlob(blob, pdfName());
       setToast("PDF ડાઉનલોડ થઈ ગઈ");
     } catch (e) { setToast("PDF બની શકી નહીં, ઇન્ટરનેટ ચેક કરીને ફરી પ્રયાસ કરો"); }
     setBusy(false);
@@ -1484,6 +1588,30 @@ export default function App() {
   const [incFilter, setIncFilter] = useState("all");
   const [passFilter, setPassFilter] = useState("all");
   const [passPay, setPassPay] = useState("all");
+
+  // Install as phone app
+  const [installEvt, setInstallEvt] = useState(null);
+  const isStandalone = typeof window !== "undefined" && (window.matchMedia?.("(display-mode: standalone)").matches || window.navigator.standalone === true);
+  const isIOS = typeof navigator !== "undefined" && (/iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+  const isMobile = isIOS || (typeof navigator !== "undefined" && /android/i.test(navigator.userAgent));
+  const [installed, setInstalled] = useState(false);
+  useEffect(() => {
+    const onPrompt = (e) => { e.preventDefault(); setInstallEvt(e); };
+    const onInstalled = () => { setInstalled(true); setInstallEvt(null); setToast("એપ ફોનમાં ઉમેરાઈ ગઈ 🎉"); };
+    window.addEventListener("beforeinstallprompt", onPrompt);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => { window.removeEventListener("beforeinstallprompt", onPrompt); window.removeEventListener("appinstalled", onInstalled); };
+  }, []);
+  const showInstall = !isStandalone && !installed && (installEvt || isMobile);
+  const installApp = async () => {
+    if (installEvt) {
+      installEvt.prompt();
+      const { outcome } = await installEvt.userChoice;
+      if (outcome === "accepted") setInstallEvt(null);
+    } else {
+      setModal({ type: "install" });
+    }
+  };
   const downloadExcel = async (festId = fest) => {
     setBusy(true);
     try {
@@ -1569,11 +1697,8 @@ export default function App() {
   const colList = cols.filter((c) => incType(c) !== PASS_TYPE && (incFilter === "all" || incType(c) === incFilter) && match(c, ["name", "flat", "note"])).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
   const exportBackup = () => {
-    const a = document.createElement("a");
     const { pinHash: _omit, ...settings } = data.settings || {};
-    a.href = URL.createObjectURL(new Blob([JSON.stringify({ ...data, settings }, null, 2)], { type: "application/json" }));
-    a.download = `karmbhumi-backup-${today()}.json`;
-    a.click();
+    saveBlob(new Blob([JSON.stringify({ ...data, settings }, null, 2)], { type: "application/json" }), `karmbhumi-backup-${today()}.json`);
   };
   const importBackup = (e) => {
     const file = e.target.files?.[0];
@@ -1593,6 +1718,11 @@ export default function App() {
   };
 
   const noFests = data.festivals.length === 0;
+  const openFestView = () => {
+    if (fest !== "all" && festMap[fest]) return setModal({ type: "view", id: fest });
+    if (sortedFests.length === 1) return setModal({ type: "view", id: sortedFests[0].id });
+    setModal({ type: "pickview" });
+  };
   const needFest = () => { setTab("fests"); setModal({ type: "fest" }); setToast("પહેલા તહેવાર ઉમેરો"); };
 
   const TABS = [
@@ -1633,8 +1763,10 @@ export default function App() {
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {showInstall && <button className="ghost" style={{ background: "var(--marigold)", color: "var(--ink)", borderColor: "var(--marigold)", fontWeight: 600 }} onClick={installApp}><Smartphone size={15} />એપ ઇન્સ્ટોલ કરો</button>}
             <button className="ghost" onClick={() => setModal({ type: "pin" })} style={{ background: isAdmin ? "rgba(233,162,27,.35)" : undefined }}>{isAdmin ? <Unlock size={15} /> : <Lock size={15} />}{isAdmin ? "એડમિન" : pinHash ? "એડમિન લૉગિન" : "એડમિન PIN બનાવો"}</button>
             <button className="ghost" onClick={() => refresh(false)} aria-label="ડેટા તાજો કરો"><RefreshCw size={15} /></button>
+            <button className="ghost" style={{ background: "#fff", color: "var(--ink)", borderColor: "#fff", fontWeight: 600 }} disabled={!loaded || noFests} onClick={openFestView}><Eye size={15} />{fest !== "all" && festMap[fest] ? `${festMap[fest].name} નો હિસાબ જુઓ` : "હિસાબ જુઓ"}</button>
             <button className="ghost" onClick={() => setModal({ type: "share" })}><FileText size={15} />PDF / WhatsApp</button>
             <button className="ghost" disabled={busy} onClick={() => downloadExcel()}><FileSpreadsheet size={15} />Excel</button>
             <button className="ghost" onClick={exportBackup}><Download size={15} />બેકઅપ લો</button>
@@ -1953,12 +2085,29 @@ export default function App() {
 
       {modal?.type === "exp" && <ExpenseForm initial={modal.item} festivals={sortedFests} defaultFest={fest !== "all" ? fest : undefined} onClose={() => setModal(null)} onSave={(x) => upsert("expenses", x, modal.item ? "ખર્ચ સુધાર્યો" : "ખર્ચ ઉમેર્યો")} />}
       {modal?.type === "col" && <CollectionForm initial={modal.item || (modal.preset && { type: MEMBER_FUND, festivalId: fest !== "all" ? fest : sortedFests[0]?.id, memberId: modal.preset.id, flat: modal.preset.house, name: modal.preset.name, amount: "", date: today(), mode: MODES[0], note: "" })} isEdit={!!modal.item} festivals={sortedFests} members={sortedMembers} collections={data.collections} defaultFest={fest !== "all" ? fest : undefined} onClose={() => setModal(null)} onSave={(x) => upsert("collections", x, modal.item ? "આવક સુધારી" : "આવક ઉમેરી")} />}
-      {modal?.type === "pass" && <PassForm initial={modal.item} isEdit={!!modal.item} festivals={sortedFests} festMap={festMap} members={sortedMembers} defaultFest={fest !== "all" ? fest : undefined} onClose={() => setModal(null)} onSave={(x) => upsert("collections", x, modal.item ? "પાસ સુધાર્યો" : "પાસ સાચવ્યો")} />}
+      {modal?.type === "pass" && <PassForm initial={modal.item} isEdit={!!modal.item} festivals={sortedFests} festMap={festMap} members={sortedMembers} collections={data.collections} defaultFest={fest !== "all" ? fest : undefined} onClose={() => setModal(null)} onSave={(x) => upsert("collections", x, modal.item ? "પાસ સુધાર્યો" : "પાસ સાચવ્યો")} />}
+      {modal?.type === "pickview" && (
+        <Modal title="કયા તહેવારનો હિસાબ જોવો છે?" onClose={() => setModal(null)}>
+          {[...sortedFests].reverse().map((f) => {
+            const i = data.collections.filter((c) => c.festivalId === f.id).reduce((a, c) => a + c.amount, 0);
+            const e = data.expenses.filter((c) => c.festivalId === f.id).reduce((a, c) => a + c.amount, 0);
+            return (
+              <button key={f.id} className="row" style={{ width: "100%", background: "none", border: "none", borderTop: "1px solid var(--line)", textAlign: "left", cursor: "pointer", color: "inherit" }}
+                onClick={() => setModal({ type: "view", id: f.id })}>
+                <div className="grow"><div className="t">{f.name} {f.year}</div><div className="s">{f.date ? fmtDate(f.date) : ""} · આવક {fmt(i)} · ખર્ચ {fmt(e)}</div></div>
+                <div className="amt" style={{ color: i - e < 0 ? "var(--kumkum)" : "var(--leaf)" }}>{fmt(i - e)}</div>
+                <Eye size={18} style={{ color: "var(--muted)" }} />
+              </button>
+            );
+          })}
+        </Modal>
+      )}
+      {modal?.type === "install" && <InstallHelp isIOS={isIOS} onClose={() => setModal(null)} />}
       {modal?.type === "passpay" && data.collections.find((c) => c.id === modal.id) && (
         <PassPayModal c={data.collections.find((c) => c.id === modal.id)} onClose={() => setModal(null)} onSave={(x) => upsert("collections", x, "પેમેન્ટ નોંધાયું")} />
       )}
-      {modal?.type === "fest" && <FestivalForm initial={modal.item} onClose={() => setModal(null)} onSave={(x) => upsert("festivals", x, modal.item ? "તહેવાર સુધાર્યો" : "તહેવાર ઉમેર્યો")} />}
-      {modal?.type === "member" && <MemberForm initial={modal.item} onClose={() => setModal(null)} onSave={(x) => upsert("members", x, modal.item ? "સભ્ય સુધાર્યા" : "સભ્ય ઉમેર્યા")} />}
+      {modal?.type === "fest" && <FestivalForm initial={modal.item} festivals={data.festivals} onClose={() => setModal(null)} onSave={(x) => upsert("festivals", x, modal.item ? "તહેવાર સુધાર્યો" : "તહેવાર ઉમેર્યો")} />}
+      {modal?.type === "member" && <MemberForm initial={modal.item} members={data.members} onClose={() => setModal(null)} onSave={(x) => upsert("members", x, modal.item ? "સભ્ય સુધાર્યા" : "સભ્ય ઉમેર્યા")} />}
       {modal?.type === "share" && <ShareModal phone={phone} setPhone={setPhone} summary={summary} busy={busy} canShareFiles={canShareFiles} onDownload={downloadPdf} onShare={sharePdf} onClose={() => setModal(null)} />}
       {modal?.type === "share" && (
         <div style={{ position: "fixed", left: -10000, top: 0 }} aria-hidden="true">
