@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Plus, Pencil, Trash2, X, Search, Download, Upload, Wallet, HandCoins, Scale, CalendarDays, LayoutDashboard, Receipt, PartyPopper, Users, FileText, Share2, MessageCircle, Lock, Unlock, RefreshCw, Cloud, Eye, FileSpreadsheet, UtensilsCrossed, Minus, Gift, BellRing, CheckCircle2, Smartphone, Share, SquarePlus, Link2, Copy, Paperclip } from "lucide-react";
+import { Plus, Pencil, Trash2, X, Search, Download, Upload, Wallet, HandCoins, Scale, CalendarDays, LayoutDashboard, Receipt, PartyPopper, Users, FileText, Share2, MessageCircle, Lock, Unlock, RefreshCw, Cloud, Eye, FileSpreadsheet, UtensilsCrossed, Minus, Gift, BellRing, CheckCircle2, Smartphone, Share, SquarePlus } from "lucide-react";
 
 const STORE_KEY = "karmbhumi-society-v1";      // shared: visible to everyone using the app
 const ADMIN_KEY = "karmbhumi-admin-pin";        // personal: this device's unlocked PIN hash
@@ -817,71 +817,27 @@ function Report({ data, fest, festMap, sortedFests, paidFor, sponsoredBy }) {
   );
 }
 
-function ShareModal({ phone, setPhone, title, summaryWithLink, link, busy, onDownload, onShare, canShareFiles, onClose }) {
-  const [downloaded, setDownloaded] = useState(false);
-  const [copied, setCopied] = useState(false);
+function ShareModal({ phone, setPhone, summary, busy, onDownload, onShare, canShareFiles, onClose }) {
   const digits = (phone || "").replace(/\D/g, "");
   const num = digits.length === 10 ? "91" + digits : digits;
-  const numOk = num.length >= 11;
-  const text = encodeURIComponent(summaryWithLink);
-  const download = async () => { if (await onDownload()) setDownloaded(true); };
-  const copyLink = async () => {
-    try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* ignore */ }
-  };
-  const stepNo = (n, done) => (
-    <span style={{ background: done ? "var(--leaf)" : "var(--marigold)", color: done ? "#fff" : "var(--ink)", borderRadius: 999, width: 24, height: 24, display: "inline-grid", placeItems: "center", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>{done ? "✓" : n}</span>
-  );
+  const text = encodeURIComponent(summary);
   return (
-    <Modal title={`${title} – PDF અને WhatsApp`} onClose={onClose}>
-      {canShareFiles && (
-        <>
-          <button className="btn" style={{ width: "100%", justifyContent: "center", padding: "14px 16px", fontSize: 16 }} disabled={busy} onClick={onShare}>
-            <Share2 size={18} />{busy ? "PDF બની રહી છે…" : "PDF સાથે WhatsApp માં મોકલો"}
-          </button>
-          <p className="hint" style={{ marginBottom: 0 }}>શેર મેનુમાં WhatsApp પસંદ કરો, પછી વ્યક્તિ કે સોસાયટી ગ્રુપ પસંદ કરો. PDF અને સારાંશ બંને સાથે જશે.</p>
-          <hr style={{ border: "none", borderTop: "1px solid var(--line)", margin: "16px 0" }} />
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>અથવા નીચેની રીતે</div>
-        </>
-      )}
-
-      <div style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 12 }}>
-        {stepNo(1, downloaded)}
-        <div style={{ flex: 1 }}>
-          <button className={downloaded ? "btn sec" : "btn"} disabled={busy} onClick={download}>
-            <FileText size={16} />{busy ? "PDF બની રહી છે…" : downloaded ? "PDF ડાઉનલોડ થઈ ગઈ – ફરી ડાઉનલોડ" : "PDF ડાઉનલોડ કરો"}
-          </button>
-        </div>
+    <Modal title="PDF અને WhatsApp" onClose={onClose}>
+      <div style={{ display: "grid", gap: 10 }}>
+        <button className="btn" disabled={busy} onClick={onDownload}><FileText size={16} />{busy ? "PDF બની રહી છે…" : "PDF ડાઉનલોડ કરો"}</button>
+        {canShareFiles && <button className="btn sec" disabled={busy} onClick={onShare}><Share2 size={16} />PDF સીધી WhatsApp માં શેર કરો</button>}
       </div>
-
-      <div style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 12 }}>
-        {stepNo(2, false)}
-        <div style={{ flex: 1, display: "grid", gap: 8 }}>
-          <div style={{ fontWeight: 500 }}>WhatsApp ખોલો (સારાંશ + લિંક જશે)</div>
-          <a className="btn sec" style={{ textDecoration: "none", justifyContent: "center" }} href={`https://wa.me/?text=${text}`} target="_blank" rel="noopener noreferrer"><Users size={16} />સોસાયટી ગ્રુપ / કોઈપણ ચેટ પસંદ કરો</a>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input className="inp" type="tel" placeholder="અથવા નંબર: 98xxxxxxxx" value={phone} onChange={(e) => setPhone(e.target.value)} />
-            <a className="btn sec" style={{ textDecoration: "none", whiteSpace: "nowrap", opacity: numOk ? 1 : 0.5, pointerEvents: numOk ? "auto" : "none" }} href={`https://wa.me/${num}?text=${text}`} target="_blank" rel="noopener noreferrer" aria-disabled={!numOk}><MessageCircle size={16} />મોકલો</a>
-          </div>
-        </div>
+      <hr style={{ border: "none", borderTop: "1px solid var(--line)", margin: "18px 0" }} />
+      <Field label="WhatsApp નંબર">
+        <input className="inp" type="tel" placeholder="દા.ત. 98xxxxxxxx" value={phone} onChange={(e) => setPhone(e.target.value)} />
+      </Field>
+      <div style={{ display: "grid", gap: 10 }}>
+        <a className="btn sec" style={{ textDecoration: "none", justifyContent: "center", opacity: num.length >= 11 ? 1 : 0.5, pointerEvents: num.length >= 11 ? "auto" : "none" }} href={`https://wa.me/${num}?text=${text}`} target="_blank" rel="noopener noreferrer"><MessageCircle size={16} />આ નંબર પર હિસાબ મોકલો</a>
+        <a className="btn sec" style={{ textDecoration: "none", justifyContent: "center" }} href={`https://wa.me/?text=${text}`} target="_blank" rel="noopener noreferrer"><Users size={16} />સોસાયટી ગ્રુપમાં મોકલો</a>
       </div>
-
-      <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-        {stepNo(3, false)}
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 500 }}>એ જ ચેટમાં PDF જોડો</div>
-          <div className="hint" style={{ fontSize: 13 }}>
-            <Paperclip size={13} style={{ verticalAlign: "-2px" }} /> (અથવા +) દબાવો → <b>Document</b> → ડાઉનલોડ કરેલી <b>Karmbhumi-….pdf</b> પસંદ કરો → મોકલો.
-          </div>
-        </div>
-      </div>
-
-      <div style={{ background: "var(--bg)", borderRadius: 8, padding: "10px 12px", marginTop: 16, fontSize: 13, color: "var(--muted)" }}>
-        WhatsApp ની લિંક દ્વારા વેબસાઇટ ફાઇલ મોકલી શકતી નથી, ફક્ત મેસેજ જાય છે. એટલે મેસેજમાં હિસાબની <b>લિંક</b> પણ મૂકી છે: સભ્યો તે ખોલીને નામ સાથે પૂરો હિસાબ જોઈ શકે અને PDF / Excel જાતે ડાઉનલોડ કરી શકે.
-        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
-          <Link2 size={14} /><span style={{ flex: 1, wordBreak: "break-all", color: "var(--ink)" }}>{link}</span>
-          <button className="btn sec" style={{ padding: "4px 10px", fontSize: 13 }} onClick={copyLink}><Copy size={13} />{copied ? "કૉપી થઈ" : "કૉપી"}</button>
-        </div>
-      </div>
+      <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 0 }}>
+        WhatsApp લિંકથી ફક્ત હિસાબનો સારાંશ મેસેજ તરીકે જાય છે. PDF મોકલવા માટે પહેલા PDF ડાઉનલોડ કરો, પછી WhatsApp ચેટમાં 📎 દબાવીને "Document" માંથી ફાઇલ જોડો. ગ્રુપ બટન દબાવ્યા પછી WhatsApp માં તમારું સોસાયટી ગ્રુપ પસંદ કરો.
+      </p>
     </Modal>
   );
 }
@@ -1495,18 +1451,6 @@ export default function App() {
     })();
   }, []);
 
-  // Shared link: /?hisab=<festivalId> opens that festival's full account
-  const linkHandled = useRef(false);
-  useEffect(() => {
-    if (!loaded || linkHandled.current) return;
-    linkHandled.current = true;
-    const id = new URLSearchParams(window.location.search).get("hisab");
-    if (!id) return;
-    if (id === "all") { setModal({ type: "pickview" }); return; }
-    if (data.festivals.some((f) => f.id === id)) { setFest(id); setModal({ type: "view", id }); }
-    else setToast("આ લિંકનો તહેવાર મળ્યો નહીં");
-  }, [loaded]);
-
   const refresh = async (silent) => {
     const d = await loadShared();
     if (d) { setData(d); setOnline(true); setSyncedAt(new Date()); if (!silent) setToast("નવો ડેટા લોડ થયો"); }
@@ -1585,9 +1529,7 @@ export default function App() {
   const pending = fest === "all" ? [] : sortedMembers.filter((m) => !covered(fest, m.id));
   const festTitle = fest === "all" ? "બધા તહેવાર" : `${festMap[fest]?.name} ${festMap[fest]?.year}`;
 
-  // Public link that opens this festival's full account (names, income, expenses, PDF/Excel buttons)
-  const reportLink = `${typeof window !== "undefined" ? window.location.origin : ""}/?hisab=${encodeURIComponent(fest)}`;
-  const summaryHead = [
+  const summary = [
     "*કર્મભૂમિ સોસાયટી, પાટણ*",
     `*${festTitle} : હિસાબ*`,
     "",
@@ -1596,11 +1538,8 @@ export default function App() {
     `બાકી સિલક: ${fmt(collected - spent)}`,
     ...(fest !== "all" ? [`ફાળો આપનાર ઘર: ${sortedMembers.length - pending.length} / ${sortedMembers.length}`] : []),
     "",
-  ];
-  // sent together with the PDF file (phone share)
-  const summaryWithFile = [...summaryHead, "વિગતવાર હિસાબ જોડેલ PDF માં છે.", "", `ઓનલાઇન જુઓ: ${reportLink}`].join("\n");
-  // sent as a plain WhatsApp message (no file possible)
-  const summaryWithLink = [...summaryHead, "📄 નામ સાથે પૂરો હિસાબ જોવા અને PDF / Excel ડાઉનલોડ કરવા આ લિંક ખોલો:", reportLink].join("\n");
+    "વિગતવાર હિસાબ PDF માં જોડેલ છે.",
+  ].join("\n");
 
   const makePdf = async () => {
     const { default: html2canvas } = await import("html2canvas");
@@ -1626,21 +1565,15 @@ export default function App() {
       const blob = await makePdf();
       saveBlob(blob, pdfName());
       setToast("PDF ડાઉનલોડ થઈ ગઈ");
-      setBusy(false);
-      return true;
-    } catch (e) {
-      console.error(e);
-      setToast("PDF બની શકી નહીં, ઇન્ટરનેટ ચેક કરીને ફરી પ્રયાસ કરો");
-      setBusy(false);
-      return false;
-    }
+    } catch (e) { setToast("PDF બની શકી નહીં, ઇન્ટરનેટ ચેક કરીને ફરી પ્રયાસ કરો"); }
+    setBusy(false);
   };
   const sharePdf = async () => {
     setBusy(true);
     try {
       const blob = await makePdf();
       const file = new File([blob], pdfName(), { type: "application/pdf" });
-      await navigator.share({ files: [file], text: summaryWithFile });
+      await navigator.share({ files: [file], text: summary });
     } catch (e) {
       if (e?.name !== "AbortError") setToast("આ ઉપકરણ પર સીધું શેર ન થયું, PDF ડાઉનલોડ કરીને મોકલો");
     }
@@ -2175,7 +2108,7 @@ export default function App() {
       )}
       {modal?.type === "fest" && <FestivalForm initial={modal.item} festivals={data.festivals} onClose={() => setModal(null)} onSave={(x) => upsert("festivals", x, modal.item ? "તહેવાર સુધાર્યો" : "તહેવાર ઉમેર્યો")} />}
       {modal?.type === "member" && <MemberForm initial={modal.item} members={data.members} onClose={() => setModal(null)} onSave={(x) => upsert("members", x, modal.item ? "સભ્ય સુધાર્યા" : "સભ્ય ઉમેર્યા")} />}
-      {modal?.type === "share" && <ShareModal phone={phone} setPhone={setPhone} title={festTitle} summaryWithLink={summaryWithLink} link={reportLink} busy={busy} canShareFiles={canShareFiles} onDownload={downloadPdf} onShare={sharePdf} onClose={() => setModal(null)} />}
+      {modal?.type === "share" && <ShareModal phone={phone} setPhone={setPhone} summary={summary} busy={busy} canShareFiles={canShareFiles} onDownload={downloadPdf} onShare={sharePdf} onClose={() => setModal(null)} />}
       {modal?.type === "share" && (
         <div style={{ position: "fixed", left: -10000, top: 0 }} aria-hidden="true">
           <div ref={reportRef}><Report data={data} fest={fest} festMap={festMap} sortedFests={sortedFests} paidFor={paidFor} sponsoredBy={sponsoredBy} /></div>
